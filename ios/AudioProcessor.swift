@@ -19,6 +19,9 @@ class AudioProcessor {
   private var opusEncoder: OpusEncoder?
   private var pendingSamples: [Int16] = []
   private let samplesPerFrame: Int
+  private let framesPerPacket: Int  // how many frames to batch before emitting
+  private var packetBuffer: Data = Data()  // accumulates encoded frames
+  private var packetFrameCount: Int = 0
   private var sequenceNumber: Int = 0
   private var startTime: Double = 0
 
@@ -32,7 +35,8 @@ class AudioProcessor {
   private var pcmFileHandle: FileHandle?
 
   // Event callbacks (all invoked on encoding queue)
-  private var onAudioChunk: ((Data, Double, Int, Float) -> Void)?
+  // onAudioChunk: (data, timestamp, sequenceNumber, audioLevel, duration, frameCount)
+  private var onAudioChunk: ((Data, Double, Int, Float, Double, Int) -> Void)?
   private var onStarted: ((_ timestamp: Double, _ sampleRate: Int, _ channels: Int, _ bitrate: Int, _ frameSize: Double, _ preSkip: Int) -> Void)?
   private var onEnd: ((_ timestamp: Double, _ totalDuration: Double, _ totalPackets: Int) -> Void)?
 
@@ -42,6 +46,7 @@ class AudioProcessor {
   init(config: AudioConfig) {
     self.config = config
     self.samplesPerFrame = Int(Double(config.sampleRate) * config.frameSize / 1000.0)
+    self.framesPerPacket = max(1, Int(config.packetDuration / config.frameSize))
     let windowMs = config.audioLevelWindow ?? 360
     self.levelUpdateSamples = config.sampleRate * config.channels * windowMs / 1000
   }
@@ -128,7 +133,7 @@ class AudioProcessor {
 
   // MARK: - Event callbacks
 
-  func setOnAudioChunk(_ callback: @escaping (Data, Double, Int, Float) -> Void) {
+  func setOnAudioChunk(_ callback: @escaping (Data, Double, Int, Float, Double, Int) -> Void) {
     self.onAudioChunk = callback
   }
 
@@ -157,7 +162,7 @@ class AudioProcessor {
         }
       }
 
-      // Encode to Opus
+      // Encode single frame to Opus
       var encodedPacket: Data?
       frameData.withUnsafeBufferPointer { bufferPointer in
         guard let baseAddress = bufferPointer.baseAddress else { return }
@@ -169,7 +174,11 @@ class AudioProcessor {
         continue
       }
 
-      // Accumulate energy for RMS over ~360ms window
+      // Accumulate encoded frame into packet buffer
+      packetBuffer.append(opusData)
+      packetFrameCount += 1
+
+      // Accumulate energy for RMS level
       for sample in frameData {
         let s = Double(sample) / 32768.0
         levelSumSquares += s * s
@@ -186,20 +195,27 @@ class AudioProcessor {
         levelSampleCount = 0
       }
 
-      let timestampMs = Date().timeIntervalSince1970 * 1000
-      onAudioChunk?(opusData, timestampMs, sequenceNumber, currentLevel)
-      sequenceNumber += 1
+      // Emit when we have enough frames for one packet (packetDuration)
+      if packetFrameCount >= framesPerPacket {
+        let timestampMs = Date().timeIntervalSince1970 * 1000
+        let duration = Double(packetFrameCount) * config.frameSize
+        onAudioChunk?(packetBuffer, timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
+        sequenceNumber += 1
+        packetBuffer = Data()
+        packetFrameCount = 0
+      }
     }
   }
 
   private func _flushRemainingFrames() {
     guard let opusEncoder = opusEncoder else { return }
-    guard !pendingSamples.isEmpty else { return }
 
-    if pendingSamples.count < samplesPerFrame {
+    // Pad remaining PCM with silence to fill the last frame
+    if !pendingSamples.isEmpty && pendingSamples.count < samplesPerFrame {
       pendingSamples.append(contentsOf: [Int16](repeating: 0, count: samplesPerFrame - pendingSamples.count))
     }
 
+    // Encode remaining frames
     while pendingSamples.count >= samplesPerFrame {
       let frameData = Array(pendingSamples.prefix(samplesPerFrame))
       pendingSamples.removeFirst(samplesPerFrame)
@@ -211,10 +227,18 @@ class AudioProcessor {
       }
 
       guard let opusData = encodedPacket, !opusData.isEmpty else { continue }
+      packetBuffer.append(opusData)
+      packetFrameCount += 1
+    }
 
+    // Flush any remaining packet buffer (even if less than framesPerPacket)
+    if !packetBuffer.isEmpty {
       let timestampMs = Date().timeIntervalSince1970 * 1000
-      onAudioChunk?(opusData, timestampMs, sequenceNumber, currentLevel)
+      let duration = Double(packetFrameCount) * config.frameSize
+      onAudioChunk?(packetBuffer, timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
       sequenceNumber += 1
+      packetBuffer = Data()
+      packetFrameCount = 0
     }
   }
 }

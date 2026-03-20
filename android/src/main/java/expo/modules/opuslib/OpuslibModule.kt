@@ -81,12 +81,14 @@ class OpuslibModule : Module() {
 
     // Set up event callbacks — audioStarted/audioEnd come from encoding thread
     android.util.Log.d(TAG, "🔗 Setting up event callbacks...")
-    manager.setOnAudioChunk { data, timestamp, sequenceNumber, audioLevel ->
+    manager.setOnAudioChunk { data, timestamp, sequenceNumber, audioLevel, duration, frameCount ->
       sendEvent("audioChunk", mapOf(
         "data" to data,
         "timestamp" to timestamp,
         "sequenceNumber" to sequenceNumber,
-        "audioLevel" to audioLevel
+        "audioLevel" to audioLevel,
+        "duration" to duration,
+        "frameCount" to frameCount
       ))
     }
 

@@ -1,18 +1,26 @@
-import { useState } from 'react';
-import Opuslib from 'opuslib';
+import { useState, useRef } from 'react';
+import Opuslib from '@imcooder/opuslib';
+import type { Subscription } from '@imcooder/opuslib';
 import { Button, SafeAreaView, ScrollView, Text, View, StyleSheet, Platform, PermissionsAndroid } from 'react-native';
 
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [packetCount, setPacketCount] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [preSkip, setPreSkip] = useState(0);
+  const [sessionDuration, setSessionDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const subscriptions = useRef<Subscription[]>([]);
 
   const startRecording = async () => {
     try {
       setError(null);
       setPacketCount(0);
       setTotalBytes(0);
+      setAudioLevel(0);
+      setPreSkip(0);
+      setSessionDuration(0);
 
       // Request microphone permission on Android
       if (Platform.OS === 'android') {
@@ -32,25 +40,52 @@ export default function App() {
         }
       }
 
-      // Subscribe to audio chunks
-      const subscription = Opuslib.addListener('audioChunk', (event) => {
-        setPacketCount((prev) => prev + 1);
-        setTotalBytes((prev) => prev + event.data.byteLength);
-        console.log(`Received Opus packet #${packetCount}: ${event.data.byteLength} bytes`);
-      });
+      // Subscribe to audioStarted
+      subscriptions.current.push(
+        Opuslib.addListener('audioStarted', (event) => {
+          setPreSkip(event.preSkip);
+          console.log(`[audioStarted] ${event.sampleRate}Hz, ${event.channels}ch, ${event.bitrate}bps, preSkip=${event.preSkip}`);
+        })
+      );
 
-      // Start streaming with DRED enabled
+      // Subscribe to audioEnd
+      subscriptions.current.push(
+        Opuslib.addListener('audioEnd', (event) => {
+          setSessionDuration(event.totalDuration);
+          console.log(`[audioEnd] duration=${event.totalDuration}ms, packets=${event.totalPackets}`);
+        })
+      );
+
+      // Subscribe to audio chunks
+      subscriptions.current.push(
+        Opuslib.addListener('audioChunk', (event) => {
+          setPacketCount((prev) => prev + 1);
+          setTotalBytes((prev) => prev + event.data.byteLength);
+          setAudioLevel(event.audioLevel);
+          console.log(`[audioChunk] #${event.sequenceNumber}: ${event.data.byteLength}B, level=${event.audioLevel.toFixed(2)}, duration=${event.duration}ms, frames=${event.frameCount}`);
+        })
+      );
+
+      // Subscribe to errors
+      subscriptions.current.push(
+        Opuslib.addListener('error', (event) => {
+          setError(event.message);
+          console.error(`[error] ${event.code}: ${event.message}`);
+        })
+      );
+
+      // Start streaming
       await Opuslib.startStreaming({
         sampleRate: 16000,
         channels: 1,
         bitrate: 24000,
         frameSize: 20,
         packetDuration: 100,
-        dredDuration: 100, // Enable 100ms DRED recovery
+        audioLevelWindow: 360,
       });
 
       setIsRecording(true);
-      console.log('Recording started with Opus 1.6 support');
+      console.log('Recording started');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       console.error('Failed to start recording:', err);
@@ -60,8 +95,13 @@ export default function App() {
   const stopRecording = async () => {
     try {
       await Opuslib.stopStreaming();
+
+      // Clean up subscriptions
+      subscriptions.current.forEach((sub) => sub.remove());
+      subscriptions.current = [];
+
       setIsRecording(false);
-      console.log(`Recording stopped. Total: ${packetCount} packets, ${totalBytes} bytes`);
+      console.log('Recording stopped');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       console.error('Failed to stop recording:', err);
@@ -71,8 +111,8 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        <Text style={styles.header}>Opus 1.6 with DRED</Text>
-        <Text style={styles.subtitle}>iOS Native Audio Encoding Example</Text>
+        <Text style={styles.header}>Opus 1.6 Audio Encoding</Text>
+        <Text style={styles.subtitle}>@imcooder/opuslib Example</Text>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Configuration</Text>
@@ -80,8 +120,8 @@ export default function App() {
           <InfoRow label="Bitrate" value="24 kbps" />
           <InfoRow label="Channels" value="Mono" />
           <InfoRow label="Frame Size" value="20 ms" />
-          <InfoRow label="Packet Duration" value="100 ms" />
-          <InfoRow label="DRED Recovery" value="100 ms" />
+          <InfoRow label="Packet Duration" value="100 ms (5 frames/packet)" />
+          <InfoRow label="Level Window" value="360 ms" />
         </View>
 
         <View style={styles.section}>
@@ -96,6 +136,7 @@ export default function App() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Statistics</Text>
           <InfoRow label="Status" value={isRecording ? 'Recording' : 'Stopped'} />
+          <InfoRow label="Pre-skip" value={`${preSkip} samples`} />
           <InfoRow label="Packets Received" value={packetCount.toString()} />
           <InfoRow label="Total Bytes" value={`${totalBytes.toLocaleString()} bytes`} />
           {totalBytes > 0 && (
@@ -104,6 +145,18 @@ export default function App() {
               value={`${Math.round(totalBytes / packetCount)} bytes`}
             />
           )}
+          <InfoRow label="Audio Level" value={`${(audioLevel * 100).toFixed(0)}%`} />
+          {sessionDuration > 0 && (
+            <InfoRow label="Session Duration" value={`${(sessionDuration / 1000).toFixed(1)}s`} />
+          )}
+        </View>
+
+        {/* Audio level bar */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Audio Level</Text>
+          <View style={styles.levelBarBg}>
+            <View style={[styles.levelBarFg, { width: `${Math.min(audioLevel * 100, 100)}%` }]} />
+          </View>
         </View>
 
         {error && (
@@ -112,15 +165,6 @@ export default function App() {
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About DRED</Text>
-          <Text style={styles.infoText}>
-            Deep Redundancy (DRED) is an Opus 1.6 feature that embeds packet loss recovery data
-            in padding. This example encodes live audio with 100ms of DRED recovery, allowing
-            the decoder to reconstruct lost packets for improved quality on lossy networks.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -196,9 +240,15 @@ const styles = StyleSheet.create({
     color: '#ff3b30',
     fontSize: 14,
   },
-  infoText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#666',
+  levelBarBg: {
+    height: 20,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  levelBarFg: {
+    height: '100%',
+    backgroundColor: '#4cd964',
+    borderRadius: 10,
   },
 });

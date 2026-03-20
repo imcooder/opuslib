@@ -58,12 +58,14 @@ public class OpuslibModule: Module {
     print("[OpuslibModule] ✅ AudioEngineManager created")
 
     // Set up event callbacks — audioStarted/audioEnd come from encoding thread
-    manager.setOnAudioChunk { [weak self] data, timestamp, sequenceNumber, audioLevel in
+    manager.setOnAudioChunk { [weak self] data, timestamp, sequenceNumber, audioLevel, duration, frameCount in
       self?.sendEvent("audioChunk", [
         "data": data,
         "timestamp": timestamp,
         "sequenceNumber": sequenceNumber,
-        "audioLevel": audioLevel
+        "audioLevel": audioLevel,
+        "duration": duration,
+        "frameCount": frameCount
       ])
     }
 

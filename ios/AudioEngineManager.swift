@@ -29,7 +29,7 @@ class AudioEngineManager {
   private var loggedFirstBuffer = false
 
   // Event callbacks
-  private var onAudioChunk: ((Data, Double, Int, Float) -> Void)?
+  private var onAudioChunk: ((Data, Double, Int, Float, Double, Int) -> Void)?
   private var onStarted: ((_ timestamp: Double, _ sampleRate: Int, _ channels: Int, _ bitrate: Int, _ frameSize: Double, _ preSkip: Int) -> Void)?
   private var onEnd: ((_ timestamp: Double, _ totalDuration: Double, _ totalPackets: Int) -> Void)?
   private var onAmplitude: ((Float, Float, Double) -> Void)?
@@ -59,8 +59,8 @@ class AudioEngineManager {
 
     // Create and start AudioProcessor (encoding thread)
     let proc = AudioProcessor(config: config)
-    proc.setOnAudioChunk { [weak self] data, timestamp, seq, level in
-      self?.onAudioChunk?(data, timestamp, seq, level)
+    proc.setOnAudioChunk { [weak self] data, timestamp, seq, level, duration, frameCount in
+      self?.onAudioChunk?(data, timestamp, seq, level, duration, frameCount)
     }
     proc.setOnStarted { [weak self] timestamp, sampleRate, channels, bitrate, frameSize, preSkip in
       self?.onStarted?(timestamp, sampleRate, channels, bitrate, frameSize, preSkip)
@@ -159,7 +159,7 @@ class AudioEngineManager {
 
   // MARK: - Event Handlers
 
-  func setOnAudioChunk(_ callback: @escaping (Data, Double, Int, Float) -> Void) {
+  func setOnAudioChunk(_ callback: @escaping (Data, Double, Int, Float, Double, Int) -> Void) {
     self.onAudioChunk = callback
   }
 

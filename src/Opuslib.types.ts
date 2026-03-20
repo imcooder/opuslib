@@ -36,6 +36,10 @@ export interface AudioChunkEvent {
   sequenceNumber: number
   /** Audio level normalized to 0.0~1.0 (mapped from dBFS, 0 = silence, 1 = loud) */
   audioLevel: number
+  /** Duration of this packet in milliseconds (frameSize * frameCount) */
+  duration: number
+  /** Number of Opus frames in this packet */
+  frameCount: number
 }
 
 /**

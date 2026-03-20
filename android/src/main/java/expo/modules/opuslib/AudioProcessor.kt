@@ -31,6 +31,9 @@ class AudioProcessor(private val config: AudioConfig) {
   private var opusEncoder: OpusEncoder? = null
   private val pendingSamples = mutableListOf<Short>()
   private val samplesPerFrame: Int = (config.sampleRate * config.frameSize / 1000.0).toInt()
+  private val framesPerPacket: Int = Math.max(1, (config.packetDuration / config.frameSize).toInt())
+  private var packetBuffer = java.io.ByteArrayOutputStream()  // accumulates encoded frames
+  private var packetFrameCount: Int = 0
   private var sequenceNumber: Int = 0
   private var startTime: Double = 0.0
 
@@ -44,7 +47,8 @@ class AudioProcessor(private val config: AudioConfig) {
   private var pcmFileOutputStream: FileOutputStream? = null
 
   // Event callbacks (all invoked on encoding thread)
-  private var onAudioChunk: ((ByteArray, Double, Int, Float) -> Unit)? = null
+  // onAudioChunk: (data, timestamp, sequenceNumber, audioLevel, duration, frameCount)
+  private var onAudioChunk: ((ByteArray, Double, Int, Float, Double, Int) -> Unit)? = null
   private var onStarted: ((timestamp: Double, sampleRate: Int, channels: Int, bitrate: Int, frameSize: Double, preSkip: Int) -> Unit)? = null
   private var onEnd: ((timestamp: Double, totalDuration: Double, totalPackets: Int) -> Unit)? = null
 
@@ -138,7 +142,7 @@ class AudioProcessor(private val config: AudioConfig) {
 
   // MARK: - Event callback setters
 
-  fun setOnAudioChunk(callback: (ByteArray, Double, Int, Float) -> Unit) {
+  fun setOnAudioChunk(callback: (ByteArray, Double, Int, Float, Double, Int) -> Unit) {
     this.onAudioChunk = callback
   }
 
@@ -179,6 +183,7 @@ class AudioProcessor(private val config: AudioConfig) {
         fos.write(bytes)
       }
 
+      // Encode single frame to Opus
       val opusData = try {
         encoder.encode(frameData, samplesPerFrame)
       } catch (e: Exception) {
@@ -191,7 +196,11 @@ class AudioProcessor(private val config: AudioConfig) {
         continue
       }
 
-      // Accumulate energy for RMS over ~360ms window
+      // Accumulate encoded frame into packet buffer
+      packetBuffer.write(opusData)
+      packetFrameCount++
+
+      // Accumulate energy for RMS level
       for (sample in frameData) {
         val s = sample.toDouble() / 32768.0
         levelSumSquares += s * s
@@ -208,20 +217,29 @@ class AudioProcessor(private val config: AudioConfig) {
         levelSampleCount = 0
       }
 
-      val timestampMs = System.currentTimeMillis().toDouble()
-      onAudioChunk?.invoke(opusData, timestampMs, sequenceNumber, currentLevel)
-      sequenceNumber++
+      // Emit when we have enough frames for one packet (packetDuration)
+      if (packetFrameCount >= framesPerPacket) {
+        val timestampMs = System.currentTimeMillis().toDouble()
+        val duration = packetFrameCount * config.frameSize
+        onAudioChunk?.invoke(packetBuffer.toByteArray(), timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
+        sequenceNumber++
+        packetBuffer.reset()
+        packetFrameCount = 0
+      }
     }
   }
 
   private fun _flushRemainingFrames() {
     val encoder = opusEncoder ?: return
-    if (pendingSamples.isEmpty()) return
 
-    while (pendingSamples.size < samplesPerFrame) {
-      pendingSamples.add(0)
+    // Pad remaining PCM with silence to fill the last frame
+    if (pendingSamples.isNotEmpty() && pendingSamples.size < samplesPerFrame) {
+      while (pendingSamples.size < samplesPerFrame) {
+        pendingSamples.add(0)
+      }
     }
 
+    // Encode remaining frames
     while (pendingSamples.size >= samplesPerFrame) {
       val frameData = ShortArray(samplesPerFrame)
       for (i in 0 until samplesPerFrame) {
@@ -235,10 +253,18 @@ class AudioProcessor(private val config: AudioConfig) {
       }
 
       if (opusData == null || opusData.isEmpty()) continue
+      packetBuffer.write(opusData)
+      packetFrameCount++
+    }
 
+    // Flush any remaining packet buffer (even if less than framesPerPacket)
+    if (packetBuffer.size() > 0) {
       val timestampMs = System.currentTimeMillis().toDouble()
-      onAudioChunk?.invoke(opusData, timestampMs, sequenceNumber, currentLevel)
+      val duration = packetFrameCount * config.frameSize
+      onAudioChunk?.invoke(packetBuffer.toByteArray(), timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
       sequenceNumber++
+      packetBuffer.reset()
+      packetFrameCount = 0
     }
   }
 }

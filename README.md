@@ -29,28 +29,36 @@
 >   });
 >   ```
 >
-> **New Fields**
-> - **`audioLevel`** — Each `audioChunk` event includes a normalized `audioLevel` (0.0~1.0), computed via configurable RMS sliding window (default 360ms) with dBFS-to-linear mapping (IEC 61606).
+> **`packetDuration` now works (was ignored in original)**
+> - In the original library, `packetDuration` was accepted but had no effect. Now it controls how many Opus frames are batched before emitting an `audioChunk` event, reducing JS bridge calls.
+> - Example: `frameSize=20ms, packetDuration=100ms` → 5 frames encoded individually, batched into one `audioChunk` event (80% fewer bridge calls).
+>
+> **New `audioChunk` fields**
+> - **`audioLevel`** — Normalized audio level (0.0~1.0), computed via configurable RMS sliding window (default 360ms) with dBFS-to-linear mapping (IEC 61606).
+> - **`duration`** — Duration of this packet in milliseconds (`frameSize * frameCount`).
+> - **`frameCount`** — Number of Opus frames contained in this packet.
+> - **`preSkip`** — (in `audioStarted` event) Opus encoder lookahead in samples. Decoders should skip this many samples at the beginning of the stream.
 >   ```typescript
 >   Opuslib.addListener('audioChunk', (event) => {
->     // event.data: ArrayBuffer            (Opus encoded packet)
+>     // event.data: ArrayBuffer            (batched Opus encoded frames)
 >     // event.timestamp: 1711000000100     (ms since epoch)
 >     // event.sequenceNumber: 5            (packet counter)
 >     // event.audioLevel: 0.72            (0=silence, 1=loud)
+>     // event.duration: 100               (ms, = frameSize * frameCount)
+>     // event.frameCount: 5               (number of Opus frames in this packet)
 >   });
 >   ```
-> - **`preSkip`** — Opus encoder lookahead in samples, returned in `audioStarted` event. Decoders should skip this many samples at the beginning of the stream.
 >
 > **New Config Options**
-> - **`audioLevelWindow`** — RMS window duration in milliseconds for audio level calculation (default: 360ms). Shorter window = more responsive, longer window = smoother.
+> - **`audioLevelWindow`** — RMS window duration in milliseconds for audio level calculation (default: 360ms). Shorter = more responsive, longer = smoother.
 >   ```typescript
 >   await Opuslib.startStreaming({
 >     sampleRate: 16000,
 >     channels: 1,
 >     bitrate: 24000,
 >     frameSize: 20,
->     packetDuration: 20,
->     audioLevelWindow: 200,  // 200ms window (default: 360ms)
+>     packetDuration: 100,   // batch 5 frames per event (was ignored before)
+>     audioLevelWindow: 200, // 200ms RMS window (default: 360ms)
 >   });
 >   ```
 
@@ -269,8 +277,10 @@ Emitted when an encoded Opus packet is ready.
 
 ```typescript
 Opuslib.addListener('audioChunk', (event: AudioChunkEvent) => {
-  // event.data: ArrayBuffer - Raw Opus packet (ready to send/save)
+  // event.data: ArrayBuffer - Batched Opus frames (ready to send/save)
   // event.audioLevel: number - Audio level 0.0~1.0 (0=silence, 1=loud)
+  // event.duration: number - Duration in ms (frameSize * frameCount)
+  // event.frameCount: number - Number of Opus frames in this packet
 });
 ```
 
@@ -278,10 +288,12 @@ Opuslib.addListener('audioChunk', (event: AudioChunkEvent) => {
 
 ```typescript
 interface AudioChunkEvent {
-  data: ArrayBuffer;         // Raw Opus-encoded audio packet
+  data: ArrayBuffer;         // Batched Opus-encoded frames
   timestamp: number;         // Milliseconds since epoch
   sequenceNumber: number;    // Incrementing packet counter
   audioLevel: number;        // Audio level 0.0~1.0 (360ms RMS window, 0=silence, 1=loud)
+  duration: number;          // Packet duration in ms (frameSize * frameCount)
+  frameCount: number;        // Number of Opus frames in this packet
 }
 ```
 

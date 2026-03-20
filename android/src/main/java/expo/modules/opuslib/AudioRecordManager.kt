@@ -37,7 +37,7 @@ class AudioRecordManager(
   private var loggedFirstBuffer = false
 
   // Event callbacks
-  private var onAudioChunk: ((ByteArray, Double, Int, Float) -> Unit)? = null
+  private var onAudioChunk: ((ByteArray, Double, Int, Float, Double, Int) -> Unit)? = null
   private var onStarted: ((timestamp: Double, sampleRate: Int, channels: Int, bitrate: Int, frameSize: Double, preSkip: Int) -> Unit)? = null
   private var onEnd: ((timestamp: Double, totalDuration: Double, totalPackets: Int) -> Unit)? = null
   private var onAmplitude: ((Float, Float, Double) -> Unit)? = null
@@ -91,8 +91,8 @@ class AudioRecordManager(
 
     // Create and start AudioProcessor (encoding thread)
     val proc = AudioProcessor(config)
-    proc.setOnAudioChunk { data, timestamp, seq, level ->
-      onAudioChunk?.invoke(data, timestamp, seq, level)
+    proc.setOnAudioChunk { data, timestamp, seq, level, duration, frameCount ->
+      onAudioChunk?.invoke(data, timestamp, seq, level, duration, frameCount)
     }
     proc.setOnStarted { timestamp, sampleRate, channels, bitrate, frameSize, preSkip ->
       onStarted?.invoke(timestamp, sampleRate, channels, bitrate, frameSize, preSkip)
@@ -172,7 +172,7 @@ class AudioRecordManager(
   }
 
   // Event handlers
-  fun setOnAudioChunk(callback: (ByteArray, Double, Int, Float) -> Unit) {
+  fun setOnAudioChunk(callback: (ByteArray, Double, Int, Float, Double, Int) -> Unit) {
     this.onAudioChunk = callback
   }
 
