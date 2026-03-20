@@ -1,6 +1,6 @@
 {
   "name": "@imcooder/opuslib",
-  "version": "2.3.2",
+  "version": "2.4.2",
   "description": "Opus 1.6 audio encoding for React Native and Expo with audio level metering and lifecycle events. Forked from Scdales/opuslib.",
   "main": "build/index.js",
   "types": "build/index.d.ts",

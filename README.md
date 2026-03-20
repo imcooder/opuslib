@@ -62,6 +62,25 @@
 >     enableAudioLevel: true, // enable per-frame audio level
 >   });
 >   ```
+> - **`iosAudioSession` — Configurable iOS AudioSession (iOS only)**
+>   - **Problem:** AudioSession was hardcoded as `.record` + `.measurement` + no options, which means: record-only (no simultaneous playback), system audio processing disabled (no AGC, no echo cancellation), no Bluetooth support, audio defaults to earpiece (not speaker).
+>   - **Solution:** New optional `iosAudioSession` parameter in `AudioConfig` lets callers customize `AVAudioSession` category, mode, and options. Omitting it preserves the original default behavior. Android/Web ignore this parameter.
+>   ```typescript
+>   await Opuslib.startStreaming({
+>     sampleRate: 24000,
+>     channels: 1,
+>     bitrate: 24000,
+>     frameSize: 20,
+>     framesPerCallback: 8,
+>     enableAudioLevel: true,
+>     // Customize iOS AudioSession for voice chat scenarios
+>     iosAudioSession: {
+>       category: 'playAndRecord',    // record + play simultaneously
+>       mode: 'default',              // enable system audio processing (AGC, echo cancellation)
+>       options: ['mixWithOthers', 'defaultToSpeaker', 'allowBluetooth', 'allowAirPlay'],
+>     },
+>   });
+>   ```
 
 Real-time audio capture and encoding using the latest Opus 1.6 codec, built from source with full native integration for iOS and Android.
 
@@ -209,6 +228,11 @@ interface AudioConfig {
   enableAudioLevel?: boolean;       // Enable per-frame audio level (default: false)
   enableAmplitudeEvents?: boolean;  // Enable amplitude monitoring (default: false)
   amplitudeEventInterval?: number;  // Amplitude update interval in ms (default: 16)
+  iosAudioSession?: {               // iOS AudioSession config (iOS only, ignored on Android/Web)
+    category: 'record' | 'playAndRecord' | 'playback' | 'ambient';
+    mode: 'default' | 'voiceChat' | 'measurement' | 'spokenAudio';
+    options?: Array<'mixWithOthers' | 'defaultToSpeaker' | 'allowBluetooth' | 'allowAirPlay' | 'allowBluetoothA2DP'>;
+  };
 }
 ```
 
@@ -408,7 +432,30 @@ The module compiles Opus 1.6 from source with the following CMake flags:
 ### iOS
 
 - **Minimum iOS Version:** 15.1+
-- **Audio Session:** Automatically configured for recording
+- **Audio Session:** Configurable via `iosAudioSession` parameter. Default: `.record` + `.measurement` + no options (pure recording, system audio processing disabled). For voice chat or playback scenarios, pass a custom config:
+
+  | Category | Description |
+  |----------|------------|
+  | `record` | Pure recording (default) |
+  | `playAndRecord` | Record + play simultaneously |
+  | `playback` | Playback only |
+  | `ambient` | Mix with other audio, no interruption |
+
+  | Mode | Description |
+  |------|------------|
+  | `measurement` | Disable system audio processing (default) |
+  | `default` | Enable AGC, echo cancellation, etc. |
+  | `voiceChat` | Optimized for voice calls |
+  | `spokenAudio` | Optimized for spoken content |
+
+  | Option | Description |
+  |--------|------------|
+  | `mixWithOthers` | Allow mixing with other audio apps |
+  | `defaultToSpeaker` | Route audio to speaker (not earpiece) |
+  | `allowBluetooth` | Allow Bluetooth HFP devices |
+  | `allowAirPlay` | Allow AirPlay output |
+  | `allowBluetoothA2DP` | Allow Bluetooth A2DP (high quality audio) |
+
 - **Permissions:** Add to `app.json`:
 
   ```json

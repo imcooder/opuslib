@@ -223,11 +223,79 @@ class AudioEngineManager {
 
   private func configureAudioSession() throws {
     let audioSession = AVAudioSession.sharedInstance()
-    try audioSession.setCategory(.record, mode: .measurement, options: [])
-    try audioSession.setPreferredSampleRate(Double(config.sampleRate))
-    try audioSession.setPreferredIOBufferDuration(config.frameSize / 1000.0)
+
+    let sessionConfig = config.iosAudioSession
+    let category = Self.mapCategory(sessionConfig?.category)
+    let mode = Self.mapMode(sessionConfig?.mode)
+    let options = Self.mapOptions(sessionConfig?.options)
+
+    // Try custom config first; if it fails (invalid combination), fallback to safe defaults
+    do {
+      try audioSession.setCategory(category, mode: mode, options: options)
+      print("[AudioEngineManager] Audio session configured: category=\(category.rawValue), mode=\(mode.rawValue), options=\(options.rawValue)")
+    } catch {
+      print("[AudioEngineManager] Custom audio session config failed (\(error.localizedDescription)), falling back to defaults")
+      do {
+        try audioSession.setCategory(.record, mode: .measurement, options: [])
+        print("[AudioEngineManager] Audio session configured with defaults: category=record, mode=measurement, options=[]")
+      } catch {
+        print("[AudioEngineManager] Fallback audio session config also failed: \(error.localizedDescription), continuing with current session")
+      }
+    }
+
+    // setPreferredSampleRate / setPreferredIOBufferDuration are hints, not hard requirements — don't let them crash
+    do { try audioSession.setPreferredSampleRate(Double(config.sampleRate)) }
+    catch { print("[AudioEngineManager] setPreferredSampleRate failed: \(error.localizedDescription)") }
+
+    do { try audioSession.setPreferredIOBufferDuration(config.frameSize / 1000.0) }
+    catch { print("[AudioEngineManager] setPreferredIOBufferDuration failed: \(error.localizedDescription)") }
+
     try audioSession.setActive(true)
-    print("[AudioEngineManager] Audio session configured")
+  }
+
+  // MARK: - String → AVAudioSession Mapping
+
+  private static func mapCategory(_ value: String?) -> AVAudioSession.Category {
+    guard let value = value else { return .record }
+    switch value {
+    case "record":          return .record
+    case "playAndRecord":   return .playAndRecord
+    case "playback":        return .playback
+    case "ambient":         return .ambient
+    default:
+      print("[AudioEngineManager] Unknown category '\(value)', falling back to .record")
+      return .record
+    }
+  }
+
+  private static func mapMode(_ value: String?) -> AVAudioSession.Mode {
+    guard let value = value else { return .measurement }
+    switch value {
+    case "default":         return .default
+    case "voiceChat":       return .voiceChat
+    case "measurement":     return .measurement
+    case "spokenAudio":     return .spokenAudio
+    default:
+      print("[AudioEngineManager] Unknown mode '\(value)', falling back to .measurement")
+      return .measurement
+    }
+  }
+
+  private static func mapOptions(_ values: [String]?) -> AVAudioSession.CategoryOptions {
+    guard let values = values else { return [] }
+    var options: AVAudioSession.CategoryOptions = []
+    for value in values {
+      switch value {
+      case "mixWithOthers":       options.insert(.mixWithOthers)
+      case "defaultToSpeaker":    options.insert(.defaultToSpeaker)
+      case "allowBluetooth":      options.insert(.allowBluetooth)
+      case "allowAirPlay":        options.insert(.allowAirPlay)
+      case "allowBluetoothA2DP":  options.insert(.allowBluetoothA2DP)
+      default:
+        print("[AudioEngineManager] Unknown option '\(value)', skipping")
+      }
+    }
+    return options
   }
 
   @objc private func handleInterruption(_ notification: Notification) {

@@ -22,6 +22,37 @@ export interface AudioConfig {
   enableAudioLevel?: boolean
   /** Save debug PCM audio to file (development only) */
   saveDebugAudio?: boolean
+  /**
+   * iOS AudioSession configuration (iOS only, ignored on Android/Web).
+   * If omitted, defaults to { category: 'record', mode: 'measurement', options: [] }
+   */
+  iosAudioSession?: {
+    /**
+     * AVAudioSession.Category
+     * - 'record': Pure recording (default)
+     * - 'playAndRecord': Record + play simultaneously
+     * - 'playback': Playback only
+     * - 'ambient': Mix with other audio, no interruption
+     */
+    category: 'record' | 'playAndRecord' | 'playback' | 'ambient'
+    /**
+     * AVAudioSession.Mode
+     * - 'default': Default mode (AGC, echo cancellation enabled)
+     * - 'voiceChat': Optimized for voice calls
+     * - 'measurement': Disable system audio processing (default)
+     * - 'spokenAudio': Optimized for spoken content
+     */
+    mode: 'default' | 'voiceChat' | 'measurement' | 'spokenAudio'
+    /**
+     * AVAudioSession.CategoryOptions (combinable)
+     * - 'mixWithOthers': Allow mixing with other audio apps
+     * - 'defaultToSpeaker': Route to speaker instead of earpiece
+     * - 'allowBluetooth': Allow Bluetooth HFP devices
+     * - 'allowAirPlay': Allow AirPlay output
+     * - 'allowBluetoothA2DP': Allow Bluetooth A2DP (high quality audio)
+     */
+    options?: Array<'mixWithOthers' | 'defaultToSpeaker' | 'allowBluetooth' | 'allowAirPlay' | 'allowBluetoothA2DP'>
+  }
 }
 
 /**

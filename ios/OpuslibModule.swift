@@ -199,6 +199,17 @@ struct AudioConfig: Record {
   @Field var amplitudeEventInterval: Double? = 16.0
   @Field var enableAudioLevel: Bool? = false  // Enable per-frame audio level calculation
   @Field var saveDebugAudio: Bool? = false
+  @Field var iosAudioSession: IOSAudioSessionConfig? = nil
+}
+
+/**
+ * iOS AudioSession configuration (category, mode, options)
+ * Maps JS string values to AVAudioSession enums
+ */
+struct IOSAudioSessionConfig: Record {
+  @Field var category: String = "record"
+  @Field var mode: String = "measurement"
+  @Field var options: [String]? = nil
 }
 
 // MARK: - Errors
