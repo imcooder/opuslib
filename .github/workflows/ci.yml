@@ -80,4 +80,4 @@ jobs:
 
       - name: Build Android
         working-directory: example/android
-        run: ./gradlew :opuslib:assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
