@@ -1,16 +1,62 @@
-# opuslib
+# @imcooder/opuslib
 
 **Opus 1.6 audio encoding for React Native and Expo**
+
+> **Fork Notice:** This project is forked from [Scdales/opuslib](https://github.com/Scdales/opuslib). We've made the following enhancements:
+>
+> **Threading & Stability**
+> - **Dedicated encoding thread** — Audio capture and Opus encoding run on separate threads (copy+post pattern). Capture thread is never blocked by encoding. All encoder operations are on a single serial queue — no locks, no cross-thread crash risk. Fixes iOS crash caused by encoding on the real-time audio thread.
+> - **Flush on stop** — Remaining PCM samples are padded with silence and encoded on stop, so no audio is lost at the end of a session.
+>
+> **New Events**
+> - **`audioStarted` event** — Emitted from the encoding thread when streaming starts. Includes actual audio config and Opus encoder `preSkip` (`OPUS_GET_LOOKAHEAD`), so decoders know how many samples to skip.
+>   ```typescript
+>   Opuslib.addListener('audioStarted', (event) => {
+>     // event.timestamp: 1711000000000    (ms since epoch)
+>     // event.sampleRate: 16000           (Hz)
+>     // event.channels: 1                 (mono)
+>     // event.bitrate: 24000              (bps)
+>     // event.frameSize: 20               (ms)
+>     // event.preSkip: 312                (samples, decoder should skip)
+>   });
+>   ```
+> - **`audioEnd` event** — Emitted from the encoding thread when streaming stops. Includes session summary.
+>   ```typescript
+>   Opuslib.addListener('audioEnd', (event) => {
+>     // event.timestamp: 1711000005000    (ms since epoch)
+>     // event.totalDuration: 5000         (ms, session length)
+>     // event.totalPackets: 250           (total encoded packets)
+>   });
+>   ```
+>
+> **New Fields**
+> - **`audioLevel`** — Each `audioChunk` event includes a normalized `audioLevel` (0.0~1.0), computed via configurable RMS sliding window (default 360ms) with dBFS-to-linear mapping (IEC 61606).
+>   ```typescript
+>   Opuslib.addListener('audioChunk', (event) => {
+>     // event.data: ArrayBuffer            (Opus encoded packet)
+>     // event.timestamp: 1711000000100     (ms since epoch)
+>     // event.sequenceNumber: 5            (packet counter)
+>     // event.audioLevel: 0.72            (0=silence, 1=loud)
+>   });
+>   ```
+> - **`preSkip`** — Opus encoder lookahead in samples, returned in `audioStarted` event. Decoders should skip this many samples at the beginning of the stream.
+>
+> **New Config Options**
+> - **`audioLevelWindow`** — RMS window duration in milliseconds for audio level calculation (default: 360ms). Shorter window = more responsive, longer window = smoother.
+>   ```typescript
+>   await Opuslib.startStreaming({
+>     sampleRate: 16000,
+>     channels: 1,
+>     bitrate: 24000,
+>     frameSize: 20,
+>     packetDuration: 20,
+>     audioLevelWindow: 200,  // 200ms window (default: 360ms)
+>   });
+>   ```
 
 Real-time audio capture and encoding using the latest Opus 1.6 codec, built from source with full native integration for iOS and Android.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://badge.fury.io/js/opuslib.svg)](https://badge.fury.io/js/opuslib)
-
----
-## Story
-
-Created as I had a need for real-time voice communication in a React Native app. Figured it could be useful to share with the community as it's a popular format for moving realtime audio over the internet!
 
 ---
 
@@ -19,6 +65,9 @@ Created as I had a need for real-time voice communication in a React Native app.
 - **Opus 1.6** - Latest codec version compiled from the [official source](https://opus-codec.org/release/stable/2025/12/15/libopus-1_6.html)
 - **Low Latency** - Real-time encoding with minimal overhead
 - **Native Performance** - Direct C/C++ integration, no JavaScript encoding
+- **Thread-safe Encoding** - Dedicated encoding thread, capture thread never blocked
+- **Audio Level Metering** - Real-time 0~1 audio level in each audio chunk (360ms RMS window)
+- **Lifecycle Events** - `audioStarted` / `audioEnd` events with session metadata
 - **High Quality** - 24kbps achieves excellent speech quality
 - **Cross-Platform** - iOS and Android with a consistent API
 - **Zero Dependencies** - Self-contained with vendored Opus source
@@ -28,6 +77,7 @@ Created as I had a need for real-time voice communication in a React Native app.
 ### Why Opus 1.6?
 
 Opus is the gold standard for real-time voice applications:
+
 - **Better compression** than AAC, MP3, or Vorbis at low bitrates
 - **Lower latency** than other codecs (as low as 5ms)
 - **Royalty-free** and open source
@@ -39,13 +89,13 @@ Opus is the gold standard for real-time voice applications:
 
 ```bash
 # Using npm
-npm install opuslib
+npm install @imcooder/opuslib
 
 # Using yarn
-yarn add opuslib
+yarn add @imcooder/opuslib
 
 # Using pnpm
-pnpm add opuslib
+pnpm add @imcooder/opuslib
 ```
 
 ### Additional Setup
@@ -53,7 +103,7 @@ pnpm add opuslib
 #### For Expo Projects
 
 ```bash
-npx expo install opuslib
+npx expo install @imcooder/opuslib
 npx expo prebuild
 ```
 
@@ -71,7 +121,7 @@ cd ios && pod install && cd ..
 ## Quick Start
 
 ```typescript
-import Opuslib from 'opuslib';
+import Opuslib from '@imcooder/opuslib';
 import { Platform, PermissionsAndroid } from 'react-native';
 
 // Request microphone permission (Android)
@@ -87,20 +137,27 @@ async function requestPermission() {
 
 // Start recording and encoding
 async function startRecording() {
-  // Request permission
   const hasPermission = await requestPermission();
   if (!hasPermission) {
     console.error('Microphone permission denied');
     return;
   }
 
+  // Listen for session lifecycle
+  Opuslib.addListener('audioStarted', (event) => {
+    console.log(`Started: ${event.sampleRate}Hz, preSkip=${event.preSkip}`);
+  });
+
+  Opuslib.addListener('audioEnd', (event) => {
+    console.log(`Ended: ${event.totalDuration}ms, ${event.totalPackets} packets`);
+  });
+
   // Listen for encoded audio chunks
   const subscription = Opuslib.addListener('audioChunk', (event) => {
-    const { data, timestamp, sequenceNumber } = event;
-    console.log(`Received ${data.byteLength} bytes of Opus audio`);
+    const { data, timestamp, sequenceNumber, audioLevel } = event;
+    console.log(`Opus packet: ${data.byteLength} bytes, level=${audioLevel.toFixed(2)}`);
 
     // Send to your backend, save to file, etc.
-    // data is an ArrayBuffer containing raw Opus packets (not packets you can write to an ogg)
   });
 
   // Start streaming
@@ -109,16 +166,13 @@ async function startRecording() {
     channels: 1,            // Mono
     bitrate: 24000,         // 24 kbps
     frameSize: 20,          // 20ms frames
-    packetDuration: 100,    // 100ms packets (5 frames)
+    packetDuration: 20,     // 20ms packets
   });
-
-  console.log('Recording started!');
 }
 
 // Stop recording
 async function stopRecording() {
   await Opuslib.stopStreaming();
-  console.log('Recording stopped');
 }
 ```
 
@@ -133,6 +187,7 @@ async function stopRecording() {
 Start audio capture and Opus encoding.
 
 **Parameters:**
+
 ```typescript
 interface AudioConfig {
   sampleRate: number;               // Sample rate in Hz (8000, 16000, 24000, 48000)
@@ -141,19 +196,21 @@ interface AudioConfig {
   frameSize: number;                // Frame duration in ms (2.5, 5, 10, 20, 40, 60)
   packetDuration: number;           // Packet duration in ms (multiple of frameSize)
   dredDuration?: number;            // Reserved for future DRED support (default: 0)
+  audioLevelWindow?: number;        // RMS window duration in ms for audioLevel (default: 360)
   enableAmplitudeEvents?: boolean;  // Enable amplitude monitoring (default: false)
   amplitudeEventInterval?: number;  // Amplitude update interval in ms (default: 16)
 }
 ```
 
 **Recommended Settings for Speech:**
+
 ```typescript
 {
   sampleRate: 16000,     // 16 kHz - optimal for speech
   channels: 1,           // Mono - sufficient for voice
   bitrate: 24000,        // 24 kbps - excellent quality
   frameSize: 20,         // 20ms - standard for real-time
-  packetDuration: 100,   // 100ms - good balance of latency/efficiency
+  packetDuration: 20,    // 20ms - low latency
 }
 ```
 
@@ -163,7 +220,7 @@ interface AudioConfig {
 
 #### `stopStreaming(): Promise<void>`
 
-Stop audio capture and encoding, release resources.
+Stop audio capture and encoding, flush remaining audio, release resources.
 
 ---
 
@@ -181,6 +238,31 @@ Resume audio capture after calling `pauseStreaming()`.
 
 ### Events
 
+#### `audioStarted`
+
+Emitted when audio streaming successfully starts. Fired from the encoding thread so all values (including `preSkip`) are read without cross-thread risk.
+
+```typescript
+Opuslib.addListener('audioStarted', (event: AudioStartedEvent) => {
+  console.log(`Streaming started at ${event.sampleRate}Hz, preSkip=${event.preSkip}`);
+});
+```
+
+**Event Data:**
+
+```typescript
+interface AudioStartedEvent {
+  timestamp: number;    // Milliseconds since epoch
+  sampleRate: number;   // Actual sample rate in Hz
+  channels: number;     // Number of channels
+  bitrate: number;      // Configured bitrate in bits/second
+  frameSize: number;    // Frame duration in milliseconds
+  preSkip: number;      // Opus encoder lookahead in samples (decoder should skip these)
+}
+```
+
+---
+
 #### `audioChunk`
 
 Emitted when an encoded Opus packet is ready.
@@ -188,17 +270,40 @@ Emitted when an encoded Opus packet is ready.
 ```typescript
 Opuslib.addListener('audioChunk', (event: AudioChunkEvent) => {
   // event.data: ArrayBuffer - Raw Opus packet (ready to send/save)
-  // event.timestamp: number - Capture timestamp in milliseconds
-  // event.sequenceNumber: number - Packet sequence number (starts at 0)
+  // event.audioLevel: number - Audio level 0.0~1.0 (0=silence, 1=loud)
 });
 ```
 
 **Event Data:**
+
 ```typescript
 interface AudioChunkEvent {
   data: ArrayBuffer;         // Raw Opus-encoded audio packet
   timestamp: number;         // Milliseconds since epoch
   sequenceNumber: number;    // Incrementing packet counter
+  audioLevel: number;        // Audio level 0.0~1.0 (360ms RMS window, 0=silence, 1=loud)
+}
+```
+
+---
+
+#### `audioEnd`
+
+Emitted when audio streaming stops. Fired from the encoding thread after flushing remaining audio.
+
+```typescript
+Opuslib.addListener('audioEnd', (event: AudioEndEvent) => {
+  console.log(`Session ended: ${event.totalDuration}ms, ${event.totalPackets} packets`);
+});
+```
+
+**Event Data:**
+
+```typescript
+interface AudioEndEvent {
+  timestamp: number;      // Milliseconds since epoch
+  totalDuration: number;  // Total session duration in milliseconds
+  totalPackets: number;   // Total number of packets encoded
 }
 ```
 
@@ -216,15 +321,6 @@ Opuslib.addAmplitudeListener((event: AmplitudeEvent) => {
 });
 ```
 
-**Event Data:**
-```typescript
-interface AmplitudeEvent {
-  rms: number;       // RMS amplitude (useful for average volume)
-  peak: number;      // Peak amplitude (useful for clipping detection)
-  timestamp: number; // Milliseconds since epoch
-}
-```
-
 ---
 
 #### `error`
@@ -237,13 +333,52 @@ Opuslib.addErrorListener((event: ErrorEvent) => {
 });
 ```
 
-**Event Data:**
-```typescript
-interface ErrorEvent {
-  code: string;      // Error code (e.g., "AUDIO_RECORD_ERROR")
-  message: string;   // Human-readable error message
-}
+---
+
+## Architecture
+
 ```
+Capture Thread                  Encoding Thread (serial queue)
+  |                               |
+  | AVAudioEngine tap (iOS)       |
+  | AudioRecord.read() (Android)  |
+  |                               |
+  | format convert + copy PCM     |
+  |---- post(samples) ----------->| pendingSamples.append(samples)
+  |                               | while (enough samples) {
+  |                               |   opus_encode()
+  |                               |   audioLevel calc (360ms RMS)
+  |                               |   emit audioChunk event
+  |                               | }
+  |                               |
+  | (stop)                        |
+  |---- syncFlush() ------------->| pad silence + encode last frame
+  |                               | emit audioEnd event
+  |                               | destroy encoder
+  |<---- done --------------------|
+```
+
+**iOS:** `DispatchQueue` (serial) as encoding thread, `AVAudioEngine` tap for capture
+
+**Android:** `HandlerThread` + `Handler` as encoding thread, `AudioRecord` loop for capture
+
+All encoder state (samples buffer, Opus encoder, audio level, sequence number) is only accessed on the encoding thread. No locks needed.
+
+### Opus Build Configuration
+
+The module compiles Opus 1.6 from source with the following CMake flags:
+
+```cmake
+-DCMAKE_BUILD_TYPE=Release
+-DOPUS_DRED=OFF                    # DRED disabled (future feature)
+-DOPUS_BUILD_SHARED_LIBRARY=OFF    # Static linking
+-DOPUS_BUILD_TESTING=OFF           # No tests
+-DOPUS_BUILD_PROGRAMS=OFF          # No CLI tools
+```
+
+**iOS:** Built as universal binary (arm64 + x86_64) for device and simulator
+
+**Android:** Built for arm64-v8a, armeabi-v7a, and x86_64
 
 ---
 
@@ -254,6 +389,7 @@ interface ErrorEvent {
 - **Minimum iOS Version:** 15.1+
 - **Audio Session:** Automatically configured for recording
 - **Permissions:** Add to `app.json`:
+
   ```json
   {
     "expo": {
@@ -270,6 +406,7 @@ interface ErrorEvent {
 
 - **Minimum SDK:** API 24 (Android 7.0)
 - **Permissions:** Automatically added to manifest, request at runtime:
+
   ```typescript
   import { PermissionsAndroid } from 'react-native';
 
@@ -280,52 +417,15 @@ interface ErrorEvent {
 
 ---
 
-## Performance
-
-Benchmarks on iPhone 14 Pro and Pixel 7:
-
-| Metric | iOS | Android |
-|--------|-----|---------|
-| Encoding Latency | <2ms per 20ms frame | <3ms per 20ms frame |
-| CPU Usage | ~2% (single core) | ~3% (single core) |
-| Memory Usage | ~5MB | ~8MB |
-| Battery Impact | Minimal | Minimal |
-
-*Note: Performance may vary based on device and configuration*
-
----
-
 ## Troubleshooting
 
 ### iOS: "Microphone permission not granted"
 
-Add `NSMicrophoneUsageDescription` to your `Info.plist` or `app.json`:
-
-```json
-{
-  "expo": {
-    "ios": {
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "We need microphone access to record audio."
-      }
-    }
-  }
-}
-```
+Add `NSMicrophoneUsageDescription` to your `Info.plist` or `app.json`.
 
 ### Android: "Microphone permission not granted"
 
-Request permission at runtime:
-
-```typescript
-import { PermissionsAndroid, Platform } from 'react-native';
-
-if (Platform.OS === 'android') {
-  await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
-  );
-}
-```
+Request permission at runtime before calling `startStreaming()`.
 
 ### Build Errors on iOS
 
@@ -351,41 +451,6 @@ cd ..
 
 ---
 
-## Technical Details
-
-### Architecture
-
-**iOS:**
-- AVAudioEngine for audio capture (48kHz PCM)
-- Custom resampler (48kHz → 16kHz)
-- Opus 1.6 encoder (native C via Swift)
-- Objective-C wrapper for CTL operations
-- Event emission via Expo modules
-
-**Android:**
-- AudioRecord for audio capture (16kHz PCM)
-- JNI wrapper for Opus 1.6 C library
-- Background thread for recording loop
-- Kotlin coroutines for async operations
-- Event emission via Expo modules
-
-### Opus Build Configuration
-
-The module compiles Opus 1.6 from source with the following CMake flags:
-
-```cmake
--DCMAKE_BUILD_TYPE=Release
--DOPUS_DRED=OFF                    # DRED disabled (future feature)
--DOPUS_BUILD_SHARED_LIBRARY=OFF    # Static linking
--DOPUS_BUILD_TESTING=OFF           # No tests
--DOPUS_BUILD_PROGRAMS=OFF          # No CLI tools
-```
-
-**iOS:** Built as universal binary (arm64 + x86_64) for device and simulator
-**Android:** Built for arm64-v8a, armeabi-v7a, and x86_64
-
----
-
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting PRs.
@@ -393,26 +458,14 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 ### Development Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/scdales/opuslib.git
+git clone https://github.com/imcooder/opuslib.git
 cd opuslib
-
-# Install dependencies
 npm install
-
-# Build TypeScript
 npm run build
 
-# Run example app
 cd example
 npm install
 npx expo run:ios    # or run:android
-```
-
-### Running Tests
-
-```bash
-npm test
 ```
 
 ---
@@ -425,6 +478,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Credits
 
+- **Original Project** - [Scdales/opuslib](https://github.com/Scdales/opuslib)
 - **Opus Codec** - [opus-codec.org](https://opus-codec.org/)
 - **Expo Modules** - [docs.expo.dev](https://docs.expo.dev/modules/)
 
@@ -432,12 +486,4 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Support
 
-- 📧 **Email:** `opuslib@outlook.com`
-- 🐛 **Issues:** [GitHub Issues](https://github.com/scdales/opuslib/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/scdales/opuslib/discussions)
-
----
-
-## Acknowledgments
-
-Special thanks to the Opus development team for creating an exceptional codec, and the Expo team for their awesome module framework.
+- **Issues:** [GitHub Issues](https://github.com/imcooder/opuslib/issues)

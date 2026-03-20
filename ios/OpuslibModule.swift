@@ -15,7 +15,7 @@ public class OpuslibModule: Module {
     Name("Opuslib")
 
     // Events
-    Events("audioChunk", "amplitude", "error")
+    Events("audioChunk", "amplitude", "audioStarted", "audioEnd", "error")
 
     // Start streaming method
     AsyncFunction("startStreaming") { (config: AudioConfig) in
@@ -57,13 +57,32 @@ public class OpuslibModule: Module {
     let manager = AudioEngineManager(config: config)
     print("[OpuslibModule] ✅ AudioEngineManager created")
 
-    // Set up event callbacks
-    print("[OpuslibModule] 🔗 Setting up event callbacks...")
-    manager.setOnAudioChunk { [weak self] data, timestamp, sequenceNumber in
+    // Set up event callbacks — audioStarted/audioEnd come from encoding thread
+    manager.setOnAudioChunk { [weak self] data, timestamp, sequenceNumber, audioLevel in
       self?.sendEvent("audioChunk", [
         "data": data,
         "timestamp": timestamp,
-        "sequenceNumber": sequenceNumber
+        "sequenceNumber": sequenceNumber,
+        "audioLevel": audioLevel
+      ])
+    }
+
+    manager.setOnStarted { [weak self] timestamp, sampleRate, channels, bitrate, frameSize, preSkip in
+      self?.sendEvent("audioStarted", [
+        "timestamp": timestamp,
+        "sampleRate": sampleRate,
+        "channels": channels,
+        "bitrate": bitrate,
+        "frameSize": frameSize,
+        "preSkip": preSkip
+      ])
+    }
+
+    manager.setOnEnd { [weak self] timestamp, totalDuration, totalPackets in
+      self?.sendEvent("audioEnd", [
+        "timestamp": timestamp,
+        "totalDuration": totalDuration,
+        "totalPackets": totalPackets
       ])
     }
 
@@ -76,17 +95,14 @@ public class OpuslibModule: Module {
     }
 
     manager.setOnError { [weak self] error in
-      print("[OpuslibModule] ❌ Error from manager: \(error.localizedDescription)")
       self?.sendEvent("error", [
         "code": "AUDIO_ENGINE_ERROR",
         "message": error.localizedDescription
       ])
     }
 
-    // Start audio capture
-    print("[OpuslibModule] 🚀 Calling manager.start()...")
+    // Start audio capture + encoding
     try manager.start()
-    print("[OpuslibModule] ✅ manager.start() completed")
 
     audioEngineManager = manager
     isStreaming = true
@@ -99,6 +115,7 @@ public class OpuslibModule: Module {
       return
     }
 
+    // stop() triggers flushAndStop() which emits audioEnd from encoding thread
     audioEngineManager?.stop()
     audioEngineManager = nil
     isStreaming = false
@@ -171,6 +188,7 @@ struct AudioConfig: Record {
   @Field var dredDuration: Int? = 100  // NEW: DRED recovery duration in ms
   @Field var enableAmplitudeEvents: Bool? = false
   @Field var amplitudeEventInterval: Double? = 16.0
+  @Field var audioLevelWindow: Int? = 360  // RMS window duration in ms (default 360)
   @Field var saveDebugAudio: Bool? = false
 }
 

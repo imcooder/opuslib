@@ -1,5 +1,5 @@
 import { NativeModule, requireNativeModule, EventEmitter } from 'expo'
-import type { AudioConfig, AudioChunkEvent, AmplitudeEvent, ErrorEvent, Subscription } from './Opuslib.types'
+import type { AudioConfig, AudioChunkEvent, AmplitudeEvent, AudioStartedEvent, AudioEndEvent, ErrorEvent, Subscription } from './Opuslib.types'
 
 /**
  * Opuslib Native Module Interface
@@ -100,11 +100,13 @@ export default {
    * ```
    */
   addListener: ((
-    eventName: 'audioChunk' | 'amplitude' | 'error',
-    listener: (event: AudioChunkEvent | AmplitudeEvent | ErrorEvent) => void
+    eventName: 'audioChunk' | 'amplitude' | 'audioStarted' | 'audioEnd' | 'error',
+    listener: (event: AudioChunkEvent | AmplitudeEvent | AudioStartedEvent | AudioEndEvent | ErrorEvent) => void
   ): Subscription => (emitter as any).addListener(eventName, listener)) as {
     (eventName: 'audioChunk', listener: (event: AudioChunkEvent) => void): Subscription
     (eventName: 'amplitude', listener: (event: AmplitudeEvent) => void): Subscription
+    (eventName: 'audioStarted', listener: (event: AudioStartedEvent) => void): Subscription
+    (eventName: 'audioEnd', listener: (event: AudioEndEvent) => void): Subscription
     (eventName: 'error', listener: (event: ErrorEvent) => void): Subscription
   },
 

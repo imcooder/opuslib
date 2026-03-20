@@ -28,6 +28,9 @@ class OpusEncoder {
   private let frameSize: Int // samples per frame
   private let dredDuration: Int // DRED recovery duration in ms
 
+  // Opus lookahead (pre-skip samples)
+  private(set) var preSkip: Int = 0
+
   // Buffer for encoded output
   private let maxPacketSize = 4000 // bytes
 
@@ -125,6 +128,15 @@ class OpusEncoder {
       print("[OpusEncoder] Warning: Failed to set DTX (error \(result))")
     }
 
+    // Get encoder lookahead (pre-skip)
+    var lookahead: Int32 = 0
+    result = Int32(OpusCtlHelpers.getLookahead(encoderPtr, lookahead: &lookahead))
+    if result == OPUS_OK {
+      self.preSkip = Int(lookahead)
+    } else {
+      print("[OpusEncoder] Warning: Failed to get lookahead (error \(result))")
+    }
+
     // Enable DRED (Opus 1.6 feature)
     if dredDurationMs > 0 {
       result = Int32(OpusCtlHelpers.setDredDuration(encoderPtr, durationMs: Int32(dredDurationMs)))
@@ -147,6 +159,7 @@ class OpusEncoder {
       - In-band FEC: \(inbandFec)
       - DTX: \(dtx)
       - DRED: \(dredDurationMs)ms
+      - Pre-skip: \(preSkip) samples
     """)
   }
 

@@ -23,7 +23,7 @@ class OpuslibModule : Module() {
     Name("Opuslib")
 
     // Events
-    Events("audioChunk", "amplitude", "error")
+    Events("audioChunk", "amplitude", "audioStarted", "audioEnd", "error")
 
     // Start streaming method
     AsyncFunction("startStreaming") { config: AudioConfig ->
@@ -79,13 +79,33 @@ class OpuslibModule : Module() {
     val manager = AudioRecordManager(context, config)
     android.util.Log.d(TAG, "✅ AudioRecordManager created")
 
-    // Set up event callbacks
+    // Set up event callbacks — audioStarted/audioEnd come from encoding thread
     android.util.Log.d(TAG, "🔗 Setting up event callbacks...")
-    manager.setOnAudioChunk { data, timestamp, sequenceNumber ->
+    manager.setOnAudioChunk { data, timestamp, sequenceNumber, audioLevel ->
       sendEvent("audioChunk", mapOf(
         "data" to data,
         "timestamp" to timestamp,
-        "sequenceNumber" to sequenceNumber
+        "sequenceNumber" to sequenceNumber,
+        "audioLevel" to audioLevel
+      ))
+    }
+
+    manager.setOnStarted { timestamp, sampleRate, channels, bitrate, frameSize, preSkip ->
+      sendEvent("audioStarted", mapOf(
+        "timestamp" to timestamp,
+        "sampleRate" to sampleRate,
+        "channels" to channels,
+        "bitrate" to bitrate,
+        "frameSize" to frameSize,
+        "preSkip" to preSkip
+      ))
+    }
+
+    manager.setOnEnd { timestamp, totalDuration, totalPackets ->
+      sendEvent("audioEnd", mapOf(
+        "timestamp" to timestamp,
+        "totalDuration" to totalDuration,
+        "totalPackets" to totalPackets
       ))
     }
 
@@ -105,7 +125,7 @@ class OpuslibModule : Module() {
       ))
     }
 
-    // Start audio capture
+    // Start audio capture + encoding
     android.util.Log.d(TAG, "🚀 Calling manager.start()...")
     manager.start()
     android.util.Log.d(TAG, "✅ manager.start() completed")
@@ -121,6 +141,7 @@ class OpuslibModule : Module() {
       return
     }
 
+    // stop() triggers flushAndStop() which emits audioEnd from encoding thread
     audioRecordManager?.stop()
     audioRecordManager = null
     isStreaming = false
@@ -180,6 +201,9 @@ class AudioConfig : Record {
 
   @Field
   var amplitudeEventInterval: Double = 16.0
+
+  @Field
+  var audioLevelWindow: Int = 360  // RMS window duration in ms (default 360)
 
   @Field
   var saveDebugAudio: Boolean = false

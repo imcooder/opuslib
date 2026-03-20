@@ -164,4 +164,35 @@ Java_expo_modules_opuslib_OpusEncoder_nativeDestroy(
   }
 }
 
+/**
+ * Get Opus encoder lookahead (pre-skip samples)
+ *
+ * @param env JNI environment
+ * @param thiz Java object instance
+ * @param encoder_ptr Encoder pointer from nativeCreate
+ * @return Lookahead in samples, or 0 on failure
+ */
+JNIEXPORT jint JNICALL
+Java_expo_modules_opuslib_OpusEncoder_nativeGetLookahead(
+    JNIEnv *env,
+    jobject thiz,
+    jlong encoder_ptr
+) {
+  OpusEncoder *encoder = reinterpret_cast<OpusEncoder*>(encoder_ptr);
+  if (!encoder) {
+    LOGE("Encoder pointer is null");
+    return 0;
+  }
+
+  opus_int32 lookahead = 0;
+  int result = opus_encoder_ctl(encoder, OPUS_GET_LOOKAHEAD(&lookahead));
+  if (result != OPUS_OK) {
+    LOGE("Failed to get lookahead: error %d", result);
+    return 0;
+  }
+
+  LOGI("Opus lookahead (pre-skip): %d samples", lookahead);
+  return static_cast<jint>(lookahead);
+}
+
 } // extern "C"

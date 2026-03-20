@@ -18,6 +18,8 @@ export interface AudioConfig {
   enableAmplitudeEvents?: boolean
   /** Amplitude event interval in milliseconds (default 16) */
   amplitudeEventInterval?: number
+  /** Audio level RMS window duration in milliseconds (default 360) */
+  audioLevelWindow?: number
   /** Save debug PCM audio to file (development only) */
   saveDebugAudio?: boolean
 }
@@ -32,6 +34,8 @@ export interface AudioChunkEvent {
   timestamp: number
   /** Sequence number (increments with each packet) */
   sequenceNumber: number
+  /** Audio level normalized to 0.0~1.0 (mapped from dBFS, 0 = silence, 1 = loud) */
+  audioLevel: number
 }
 
 /**
@@ -44,6 +48,38 @@ export interface AmplitudeEvent {
   peak: number
   /** Timestamp in milliseconds */
   timestamp: number
+}
+
+/**
+ * Audio started event payload
+ * Emitted when audio streaming successfully starts
+ */
+export interface AudioStartedEvent {
+  /** Timestamp in milliseconds when streaming started */
+  timestamp: number
+  /** Actual sample rate being used */
+  sampleRate: number
+  /** Number of channels */
+  channels: number
+  /** Configured bitrate in bits/second */
+  bitrate: number
+  /** Frame duration in milliseconds */
+  frameSize: number
+  /** Opus encoder lookahead in samples (decoder should skip this many samples at start) */
+  preSkip: number
+}
+
+/**
+ * Audio end event payload
+ * Emitted when audio streaming stops
+ */
+export interface AudioEndEvent {
+  /** Timestamp in milliseconds when streaming stopped */
+  timestamp: number
+  /** Total duration of the streaming session in milliseconds */
+  totalDuration: number
+  /** Total number of packets encoded during the session */
+  totalPackets: number
 }
 
 /**

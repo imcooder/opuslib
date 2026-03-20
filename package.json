@@ -1,7 +1,7 @@
 {
-  "name": "opuslib",
-  "version": "0.1.2",
-  "description": "Opuslib wrapper",
+  "name": "@imcooder/opuslib",
+  "version": "0.2.0",
+  "description": "Opus 1.6 audio encoding for React Native and Expo with audio level metering and lifecycle events. Forked from Scdales/opuslib.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "scripts": {
@@ -31,13 +31,13 @@
     "opus-codec",
     "Opus Codec"
   ],
-  "repository": "https://github.com/Scdales/opuslib",
+  "repository": "https://github.com/imcooder/opuslib",
   "bugs": {
-    "url": "https://github.com/Scdales/opuslib/issues"
+    "url": "https://github.com/imcooder/opuslib/issues"
   },
-  "author": "Scdales <opuslib@outlook.com> (https://github.com/Scdales)",
+  "author": "imcooder (https://github.com/imcooder)",
   "license": "MIT",
-  "homepage": "https://github.com/Scdales/opuslib#readme",
+  "homepage": "https://github.com/imcooder/opuslib#readme",
   "dependencies": {},
   "devDependencies": {
     "@types/react": "~19.1.0",
