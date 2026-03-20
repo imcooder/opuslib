@@ -12,3 +12,7 @@ __tests__
 /android/src/test/
 /android/build/
 /example/
+
+# Opus source is extracted from archive at install time
+/opus-1.6/
+/thirdparty/

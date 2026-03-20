@@ -10,9 +10,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Note: The path is relative to this CMakeLists.txt file
 # From: android/src/main/cpp/CMakeLists.txt
 # To:   opus-1.6/
-# Path: ../../../../opus-1.6
+# Path: ../../../../thirdparty/opus-1.6
 add_subdirectory(
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../opus-1.6
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../thirdparty/opus-1.6
   ${CMAKE_CURRENT_BINARY_DIR}/opus-build
 )
 
@@ -35,5 +35,5 @@ target_link_libraries(
 target_include_directories(
   opuslib-jni
   PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../opus-1.6/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../thirdparty/opus-1.6/include
 )

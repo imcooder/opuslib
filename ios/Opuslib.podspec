@@ -33,7 +33,7 @@ Pod::Spec.new do |s|
     # Configure with CMake targeting iOS (disable DRED, disable shared library and tests)
     # opus-1.6 is one directory up and then one more up from ios/opus-build/
     # Note: DRED disabled - can be enabled later if needed
-    cmake ../../opus-1.6 \
+    cmake ../../thirdparty/opus-1.6 \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_SYSTEM_NAME=iOS \
       -DCMAKE_OSX_DEPLOYMENT_TARGET=15.1 \
@@ -61,7 +61,7 @@ Pod::Spec.new do |s|
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/../opus-1.6/include"'
+    'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/../thirdparty/opus-1.6/include"'
   }
 
   s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Step 1: LFS + extract + opus encode/decode test
+  validate-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Verify LFS files pulled
+        run: |
+          file large_files_store/opus-1.6.tar.gz
+          ls -lh large_files_store/opus-1.6.tar.gz
+          # Ensure it's a real file, not an LFS pointer
+          head -c 4 large_files_store/opus-1.6.tar.gz | xxd | grep -q "1f8b" && echo "Valid gzip archive" || (echo "ERROR: LFS file not pulled" && exit 1)
+
+      - name: Extract opus source
+        run: node scripts/postinstall.js
+
+      - name: Verify opus headers exist
+        run: |
+          test -f thirdparty/opus-1.6/include/opus.h
+          test -f thirdparty/opus-1.6/CMakeLists.txt
+          echo "Opus source extracted successfully"
+
+      - name: Build and run opus encode/decode test
+        run: |
+          cmake -B build-test tests \
+            -DOPUS_BUILD_TESTING=OFF \
+            -DOPUS_BUILD_PROGRAMS=OFF
+          cmake --build build-test --target test_opus_encode_decode -j$(nproc)
+          ./build-test/test_opus_encode_decode
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: TypeScript check
+        run: npx expo-module-scripts build
+
+  # Step 2: Android build
+  build-android:
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Extract opus source
+        run: node scripts/postinstall.js
+
+      - name: Install example dependencies
+        working-directory: example
+        run: npm install
+
+      - name: Build Android
+        working-directory: example/android
+        run: ./gradlew :opuslib:assembleRelease --no-daemon

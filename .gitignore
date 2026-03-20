@@ -2,6 +2,9 @@
 node_modules/
 .npmrc
 
+# Opus source (extracted from large_files_store/opus-1.6.tar.gz at install time)
+thirdparty/
+
 # Build outputs
 build/
 *.log
