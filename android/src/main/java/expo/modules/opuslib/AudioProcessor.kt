@@ -8,6 +8,14 @@ import java.io.FileOutputStream
 import java.util.concurrent.CountDownLatch
 
 /**
+ * A single encoded Opus frame with optional per-frame audio level.
+ */
+data class EncodedFrame(
+  val data: ByteArray,
+  val audioLevel: Float?  // null when enableAudioLevel is false
+)
+
+/**
  * AudioProcessor - Dedicated encoding thread for Opus encoding and dispatch.
  *
  * Architecture (matches genspark-flow XAudioProcessor / iOS AudioProcessor):
@@ -31,24 +39,20 @@ class AudioProcessor(private val config: AudioConfig) {
   private var opusEncoder: OpusEncoder? = null
   private val pendingSamples = mutableListOf<Short>()
   private val samplesPerFrame: Int = (config.sampleRate * config.frameSize / 1000.0).toInt()
-  private val framesPerPacket: Int = Math.max(1, (config.packetDuration / config.frameSize).toInt())
-  private var packetBuffer = java.io.ByteArrayOutputStream()  // accumulates encoded frames
-  private var packetFrameCount: Int = 0
+  private val framesPerPacket: Int = Math.max(1, config.framesPerCallback)
+  private var packetFrames = mutableListOf<EncodedFrame>()  // independent Opus packets with per-frame level
   private var sequenceNumber: Int = 0
   private var startTime: Double = 0.0
 
-  // Audio level: accumulate RMS over ~360ms window
-  private var levelSumSquares: Double = 0.0
-  private var levelSampleCount: Int = 0
-  private val levelUpdateSamples: Int = config.sampleRate * config.channels * config.audioLevelWindow / 1000
-  private var currentLevel: Float = 0.0f
+  // Whether to compute per-frame audio level
+  private val enableAudioLevel: Boolean = config.enableAudioLevel
 
   // Debug file output
   private var pcmFileOutputStream: FileOutputStream? = null
 
   // Event callbacks (all invoked on encoding thread)
-  // onAudioChunk: (data, timestamp, sequenceNumber, audioLevel, duration, frameCount)
-  private var onAudioChunk: ((ByteArray, Double, Int, Float, Double, Int) -> Unit)? = null
+  // onAudioChunk: (frames, timestamp, sequenceNumber, duration, frameCount)
+  private var onAudioChunk: ((List<EncodedFrame>, Double, Int, Double, Int) -> Unit)? = null
   private var onStarted: ((timestamp: Double, sampleRate: Int, channels: Int, bitrate: Int, frameSize: Double, preSkip: Int) -> Unit)? = null
   private var onEnd: ((timestamp: Double, totalDuration: Double, totalPackets: Int) -> Unit)? = null
 
@@ -142,7 +146,7 @@ class AudioProcessor(private val config: AudioConfig) {
 
   // MARK: - Event callback setters
 
-  fun setOnAudioChunk(callback: (ByteArray, Double, Int, Float, Double, Int) -> Unit) {
+  fun setOnAudioChunk(callback: (List<EncodedFrame>, Double, Int, Double, Int) -> Unit) {
     this.onAudioChunk = callback
   }
 
@@ -196,35 +200,32 @@ class AudioProcessor(private val config: AudioConfig) {
         continue
       }
 
-      // Accumulate encoded frame into packet buffer
-      packetBuffer.write(opusData)
-      packetFrameCount++
-
-      // Accumulate energy for RMS level
-      for (sample in frameData) {
-        val s = sample.toDouble() / 32768.0
-        levelSumSquares += s * s
-      }
-      levelSampleCount += frameData.size
-
-      if (levelSampleCount >= levelUpdateSamples) {
-        val rms = Math.sqrt(levelSumSquares / levelSampleCount)
+      // Per-frame audio level (RMS → dBFS → 0~1)
+      var frameLevel: Float? = null
+      if (enableAudioLevel) {
+        var sumSquares = 0.0
+        for (sample in frameData) {
+          val s = sample.toDouble() / 32768.0
+          sumSquares += s * s
+        }
+        val rms = Math.sqrt(sumSquares / frameData.size)
         val dB = 20.0 * Math.log10(Math.max(rms, 1e-10))
         val dbFloor = -35.0
         val dbCeiling = -6.0
-        currentLevel = Math.max(0.0, Math.min(1.0, (dB - dbFloor) / (dbCeiling - dbFloor))).toFloat()
-        levelSumSquares = 0.0
-        levelSampleCount = 0
+        frameLevel = Math.max(0.0, Math.min(1.0, (dB - dbFloor) / (dbCeiling - dbFloor))).toFloat()
       }
 
-      // Emit when we have enough frames for one packet (packetDuration)
-      if (packetFrameCount >= framesPerPacket) {
+      // Accumulate encoded frame as independent packet (no byte concatenation)
+      packetFrames.add(EncodedFrame(data = opusData, audioLevel = frameLevel))
+
+      // Emit when we have enough frames (framesPerCallback)
+      if (packetFrames.size >= framesPerPacket) {
         val timestampMs = System.currentTimeMillis().toDouble()
-        val duration = packetFrameCount * config.frameSize
-        onAudioChunk?.invoke(packetBuffer.toByteArray(), timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
+        val frameCount = packetFrames.size
+        val duration = frameCount * config.frameSize
+        onAudioChunk?.invoke(packetFrames.toList(), timestampMs, sequenceNumber, duration, frameCount)
         sequenceNumber++
-        packetBuffer.reset()
-        packetFrameCount = 0
+        packetFrames.clear()
       }
     }
   }
@@ -253,18 +254,18 @@ class AudioProcessor(private val config: AudioConfig) {
       }
 
       if (opusData == null || opusData.isEmpty()) continue
-      packetBuffer.write(opusData)
-      packetFrameCount++
+      // Flush frames get level 0 (silence-padded)
+      packetFrames.add(EncodedFrame(data = opusData, audioLevel = if (enableAudioLevel) 0.0f else null))
     }
 
-    // Flush any remaining packet buffer (even if less than framesPerPacket)
-    if (packetBuffer.size() > 0) {
+    // Flush any remaining frames (even if less than framesPerPacket)
+    if (packetFrames.isNotEmpty()) {
       val timestampMs = System.currentTimeMillis().toDouble()
-      val duration = packetFrameCount * config.frameSize
-      onAudioChunk?.invoke(packetBuffer.toByteArray(), timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
+      val frameCount = packetFrames.size
+      val duration = frameCount * config.frameSize
+      onAudioChunk?.invoke(packetFrames.toList(), timestampMs, sequenceNumber, duration, frameCount)
       sequenceNumber++
-      packetBuffer.reset()
-      packetFrameCount = 0
+      packetFrames.clear()
     }
   }
 }

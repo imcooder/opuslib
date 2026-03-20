@@ -11,6 +11,12 @@ import Foundation
  * - audioStarted/audioEnd events are emitted from the encoding queue,
  *   so preSkip/sequenceNumber are read without cross-thread risk
  */
+/// A single encoded Opus frame with optional per-frame audio level
+struct EncodedFrame {
+  let data: Data
+  let audioLevel: Float?  // nil when enableAudioLevel is false
+}
+
 class AudioProcessor {
   // Dedicated serial queue — equivalent to boost::asio::io_context + thread / HandlerThread
   private let queue = DispatchQueue(label: "com.opuslib.encoding", qos: .userInitiated)
@@ -20,23 +26,19 @@ class AudioProcessor {
   private var pendingSamples: [Int16] = []
   private let samplesPerFrame: Int
   private let framesPerPacket: Int  // how many frames to batch before emitting
-  private var packetBuffer: Data = Data()  // accumulates encoded frames
-  private var packetFrameCount: Int = 0
+  private var packetFrames: [EncodedFrame] = []  // independent Opus packets with per-frame level
   private var sequenceNumber: Int = 0
   private var startTime: Double = 0
 
-  // Audio level: accumulate RMS over ~360ms window
-  private var levelSumSquares: Double = 0.0
-  private var levelSampleCount: Int = 0
-  private let levelUpdateSamples: Int
-  private var currentLevel: Float = 0.0
+  // Whether to compute per-frame audio level
+  private let enableAudioLevel: Bool
 
   // Debug file
   private var pcmFileHandle: FileHandle?
 
   // Event callbacks (all invoked on encoding queue)
-  // onAudioChunk: (data, timestamp, sequenceNumber, audioLevel, duration, frameCount)
-  private var onAudioChunk: ((Data, Double, Int, Float, Double, Int) -> Void)?
+  // onAudioChunk: (frames, timestamp, sequenceNumber, duration, frameCount)
+  private var onAudioChunk: (([EncodedFrame], Double, Int, Double, Int) -> Void)?
   private var onStarted: ((_ timestamp: Double, _ sampleRate: Int, _ channels: Int, _ bitrate: Int, _ frameSize: Double, _ preSkip: Int) -> Void)?
   private var onEnd: ((_ timestamp: Double, _ totalDuration: Double, _ totalPackets: Int) -> Void)?
 
@@ -46,9 +48,9 @@ class AudioProcessor {
   init(config: AudioConfig) {
     self.config = config
     self.samplesPerFrame = Int(Double(config.sampleRate) * config.frameSize / 1000.0)
-    self.framesPerPacket = max(1, Int(config.packetDuration / config.frameSize))
-    let windowMs = config.audioLevelWindow ?? 360
-    self.levelUpdateSamples = config.sampleRate * config.channels * windowMs / 1000
+    let framesPerCallback = config.framesPerCallback ?? 1
+    self.framesPerPacket = max(1, framesPerCallback)
+    self.enableAudioLevel = config.enableAudioLevel ?? false
   }
 
   // MARK: - Public API
@@ -133,7 +135,7 @@ class AudioProcessor {
 
   // MARK: - Event callbacks
 
-  func setOnAudioChunk(_ callback: @escaping (Data, Double, Int, Float, Double, Int) -> Void) {
+  func setOnAudioChunk(_ callback: @escaping ([EncodedFrame], Double, Int, Double, Int) -> Void) {
     self.onAudioChunk = callback
   }
 
@@ -174,35 +176,32 @@ class AudioProcessor {
         continue
       }
 
-      // Accumulate encoded frame into packet buffer
-      packetBuffer.append(opusData)
-      packetFrameCount += 1
-
-      // Accumulate energy for RMS level
-      for sample in frameData {
-        let s = Double(sample) / 32768.0
-        levelSumSquares += s * s
-      }
-      levelSampleCount += frameData.count
-
-      if levelSampleCount >= levelUpdateSamples {
-        let rms = sqrt(levelSumSquares / Double(levelSampleCount))
+      // Per-frame audio level (RMS → dBFS → 0~1)
+      var frameLevel: Float? = nil
+      if enableAudioLevel {
+        var sumSquares: Double = 0.0
+        for sample in frameData {
+          let s = Double(sample) / 32768.0
+          sumSquares += s * s
+        }
+        let rms = sqrt(sumSquares / Double(frameData.count))
         let dB = 20.0 * log10(max(rms, 1e-10))
         let dbFloor = -35.0
         let dbCeiling = -6.0
-        currentLevel = Float(max(0.0, min(1.0, (dB - dbFloor) / (dbCeiling - dbFloor))))
-        levelSumSquares = 0.0
-        levelSampleCount = 0
+        frameLevel = Float(max(0.0, min(1.0, (dB - dbFloor) / (dbCeiling - dbFloor))))
       }
 
-      // Emit when we have enough frames for one packet (packetDuration)
-      if packetFrameCount >= framesPerPacket {
+      // Accumulate encoded frame as independent packet (no byte concatenation)
+      packetFrames.append(EncodedFrame(data: opusData, audioLevel: frameLevel))
+
+      // Emit when we have enough frames (framesPerCallback)
+      if packetFrames.count >= framesPerPacket {
         let timestampMs = Date().timeIntervalSince1970 * 1000
-        let duration = Double(packetFrameCount) * config.frameSize
-        onAudioChunk?(packetBuffer, timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
+        let frameCount = packetFrames.count
+        let duration = Double(frameCount) * config.frameSize
+        onAudioChunk?(packetFrames, timestampMs, sequenceNumber, duration, frameCount)
         sequenceNumber += 1
-        packetBuffer = Data()
-        packetFrameCount = 0
+        packetFrames.removeAll()
       }
     }
   }
@@ -227,18 +226,18 @@ class AudioProcessor {
       }
 
       guard let opusData = encodedPacket, !opusData.isEmpty else { continue }
-      packetBuffer.append(opusData)
-      packetFrameCount += 1
+      // Flush frames get level 0 (silence-padded)
+      packetFrames.append(EncodedFrame(data: opusData, audioLevel: enableAudioLevel ? 0.0 : nil))
     }
 
-    // Flush any remaining packet buffer (even if less than framesPerPacket)
-    if !packetBuffer.isEmpty {
+    // Flush any remaining frames (even if less than framesPerPacket)
+    if !packetFrames.isEmpty {
       let timestampMs = Date().timeIntervalSince1970 * 1000
-      let duration = Double(packetFrameCount) * config.frameSize
-      onAudioChunk?(packetBuffer, timestampMs, sequenceNumber, currentLevel, duration, packetFrameCount)
+      let frameCount = packetFrames.count
+      let duration = Double(frameCount) * config.frameSize
+      onAudioChunk?(packetFrames, timestampMs, sequenceNumber, duration, frameCount)
       sequenceNumber += 1
-      packetBuffer = Data()
-      packetFrameCount = 0
+      packetFrames.removeAll()
     }
   }
 }

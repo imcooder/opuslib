@@ -29,36 +29,37 @@
 >   });
 >   ```
 >
-> **`packetDuration` now works (was ignored in original)**
-> - In the original library, `packetDuration` was accepted but had no effect. Now it controls how many Opus frames are batched before emitting an `audioChunk` event, reducing JS bridge calls.
-> - Example: `frameSize=20ms, packetDuration=100ms` → 5 frames encoded individually, batched into one `audioChunk` event (80% fewer bridge calls).
+> **`framesPerCallback` — batch multiple frames to reduce data transfer overhead**
+> - Multiple independently-encoded Opus frames can be batched into a single `audioChunk` callback via `framesPerCallback`, reducing JS bridge calls and data transfer overhead. Each frame in `frames[]` is a complete, independently decodable Opus packet (with its own TOC byte) — no illegal byte concatenation.
+> - Example: `frameSize=20ms, framesPerCallback=5` → 5 frames encoded individually, returned as `frames: OpusFrame[]` in one `audioChunk` event (80% fewer bridge calls).
 >
 > **New `audioChunk` fields**
-> - **`audioLevel`** — Normalized audio level (0.0~1.0), computed via configurable RMS sliding window (default 360ms) with dBFS-to-linear mapping (IEC 61606).
-> - **`duration`** — Duration of this packet in milliseconds (`frameSize * frameCount`).
-> - **`frameCount`** — Number of Opus frames contained in this packet.
+> - **`frames`** — Array of `OpusFrame` objects. Each frame is an independent, decodable Opus packet (with its own TOC byte). No illegal byte concatenation.
+> - **`OpusFrame.audioLevel`** — Per-frame normalized audio level (0.0~1.0), computed via RMS with dBFS-to-linear mapping. Only present when `enableAudioLevel: true`. Consumers can average neighboring frames for smoothing.
+> - **`duration`** — Duration of all frames in milliseconds (`frameSize * frameCount`).
+> - **`frameCount`** — Number of Opus frames in this callback (= `frames.length`).
 > - **`preSkip`** — (in `audioStarted` event) Opus encoder lookahead in samples. Decoders should skip this many samples at the beginning of the stream.
 >   ```typescript
 >   Opuslib.addListener('audioChunk', (event) => {
->     // event.data: ArrayBuffer            (batched Opus encoded frames)
+>     // event.frames: OpusFrame[]           (independent Opus packets)
+>     //   each frame: { data: ArrayBuffer, audioLevel?: number }
 >     // event.timestamp: 1711000000100     (ms since epoch)
->     // event.sequenceNumber: 5            (packet counter)
->     // event.audioLevel: 0.72            (0=silence, 1=loud)
+>     // event.sequenceNumber: 5            (callback counter)
 >     // event.duration: 100               (ms, = frameSize * frameCount)
->     // event.frameCount: 5               (number of Opus frames in this packet)
+>     // event.frameCount: 5               (= frames.length)
 >   });
 >   ```
 >
 > **New Config Options**
-> - **`audioLevelWindow`** — RMS window duration in milliseconds for audio level calculation (default: 360ms). Shorter = more responsive, longer = smoother.
+> - **`enableAudioLevel`** — Enable per-frame audio level calculation (default: false). When enabled, each `OpusFrame` includes `audioLevel` (0.0~1.0). Disabled by default to save computation.
 >   ```typescript
 >   await Opuslib.startStreaming({
 >     sampleRate: 16000,
 >     channels: 1,
 >     bitrate: 24000,
 >     frameSize: 20,
->     packetDuration: 100,   // batch 5 frames per event (was ignored before)
->     audioLevelWindow: 200, // 200ms RMS window (default: 360ms)
+>     framesPerCallback: 5,  // batch 5 independent Opus frames per event
+>     enableAudioLevel: true, // enable per-frame audio level
 >   });
 >   ```
 
@@ -74,7 +75,7 @@ Real-time audio capture and encoding using the latest Opus 1.6 codec, built from
 - **Low Latency** - Real-time encoding with minimal overhead
 - **Native Performance** - Direct C/C++ integration, no JavaScript encoding
 - **Thread-safe Encoding** - Dedicated encoding thread, capture thread never blocked
-- **Audio Level Metering** - Real-time 0~1 audio level in each audio chunk (360ms RMS window)
+- **Audio Level Metering** - Optional per-frame 0~1 audio level via RMS (enable with `enableAudioLevel: true`)
 - **Lifecycle Events** - `audioStarted` / `audioEnd` events with session metadata
 - **High Quality** - 24kbps achieves excellent speech quality
 - **Cross-Platform** - iOS and Android with a consistent API
@@ -162,10 +163,11 @@ async function startRecording() {
 
   // Listen for encoded audio chunks
   const subscription = Opuslib.addListener('audioChunk', (event) => {
-    const { data, timestamp, sequenceNumber, audioLevel } = event;
-    console.log(`Opus packet: ${data.byteLength} bytes, level=${audioLevel.toFixed(2)}`);
-
-    // Send to your backend, save to file, etc.
+    const { frames, timestamp, sequenceNumber } = event;
+    for (const frame of frames) {
+      console.log(`Opus packet: ${frame.data.byteLength} bytes, level=${frame.audioLevel?.toFixed(2) ?? 'N/A'}`);
+      // Send each independent Opus packet to your backend, save to file, etc.
+    }
   });
 
   // Start streaming
@@ -174,7 +176,7 @@ async function startRecording() {
     channels: 1,            // Mono
     bitrate: 24000,         // 24 kbps
     frameSize: 20,          // 20ms frames
-    packetDuration: 20,     // 20ms packets
+    framesPerCallback: 1,   // 1 frame per callback (default)
   });
 }
 
@@ -202,9 +204,9 @@ interface AudioConfig {
   channels: number;                 // Number of channels (1 = mono, 2 = stereo)
   bitrate: number;                  // Target bitrate in bits/second (e.g., 24000)
   frameSize: number;                // Frame duration in ms (2.5, 5, 10, 20, 40, 60)
-  packetDuration: number;           // Packet duration in ms (multiple of frameSize)
+  framesPerCallback?: number;       // Frames per callback (default 1), batching reduces bridge calls
   dredDuration?: number;            // Reserved for future DRED support (default: 0)
-  audioLevelWindow?: number;        // RMS window duration in ms for audioLevel (default: 360)
+  enableAudioLevel?: boolean;       // Enable per-frame audio level (default: false)
   enableAmplitudeEvents?: boolean;  // Enable amplitude monitoring (default: false)
   amplitudeEventInterval?: number;  // Amplitude update interval in ms (default: 16)
 }
@@ -218,7 +220,7 @@ interface AudioConfig {
   channels: 1,           // Mono - sufficient for voice
   bitrate: 24000,        // 24 kbps - excellent quality
   frameSize: 20,         // 20ms - standard for real-time
-  packetDuration: 20,    // 20ms - low latency
+  framesPerCallback: 1,  // 1 frame per callback - low latency
 }
 ```
 
@@ -277,23 +279,30 @@ Emitted when an encoded Opus packet is ready.
 
 ```typescript
 Opuslib.addListener('audioChunk', (event: AudioChunkEvent) => {
-  // event.data: ArrayBuffer - Batched Opus frames (ready to send/save)
-  // event.audioLevel: number - Audio level 0.0~1.0 (0=silence, 1=loud)
+  // event.frames: OpusFrame[] - Independent Opus packets (each decodable on its own)
+  //   frame.audioLevel?: number - Per-frame level 0.0~1.0 (when enableAudioLevel is true)
   // event.duration: number - Duration in ms (frameSize * frameCount)
-  // event.frameCount: number - Number of Opus frames in this packet
+  // event.frameCount: number - Number of Opus frames (= frames.length)
+  for (const frame of event.frames) {
+    websocket.send(frame.data);  // each frame is an independent Opus packet
+  }
 });
 ```
 
 **Event Data:**
 
 ```typescript
+interface OpusFrame {
+  data: ArrayBuffer;         // Independent Opus packet (one opus_encode() output with its own TOC byte)
+  audioLevel?: number;       // Per-frame audio level 0.0~1.0 (only when enableAudioLevel is true)
+}
+
 interface AudioChunkEvent {
-  data: ArrayBuffer;         // Batched Opus-encoded frames
+  frames: OpusFrame[];       // Array of independent Opus packets
   timestamp: number;         // Milliseconds since epoch
-  sequenceNumber: number;    // Incrementing packet counter
-  audioLevel: number;        // Audio level 0.0~1.0 (360ms RMS window, 0=silence, 1=loud)
-  duration: number;          // Packet duration in ms (frameSize * frameCount)
-  frameCount: number;        // Number of Opus frames in this packet
+  sequenceNumber: number;    // Incrementing callback counter
+  duration: number;          // Total duration in ms (frameSize * frameCount)
+  frameCount: number;        // Number of Opus frames (= frames.length)
 }
 ```
 
@@ -359,7 +368,7 @@ Capture Thread                  Encoding Thread (serial queue)
   |---- post(samples) ----------->| pendingSamples.append(samples)
   |                               | while (enough samples) {
   |                               |   opus_encode()
-  |                               |   audioLevel calc (360ms RMS)
+  |                               |   per-frame audioLevel (if enabled)
   |                               |   emit audioChunk event
   |                               | }
   |                               |

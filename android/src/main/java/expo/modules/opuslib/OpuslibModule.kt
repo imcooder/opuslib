@@ -81,12 +81,17 @@ class OpuslibModule : Module() {
 
     // Set up event callbacks — audioStarted/audioEnd come from encoding thread
     android.util.Log.d(TAG, "🔗 Setting up event callbacks...")
-    manager.setOnAudioChunk { data, timestamp, sequenceNumber, audioLevel, duration, frameCount ->
+    manager.setOnAudioChunk { frames, timestamp, sequenceNumber, duration, frameCount ->
+      // Each frame is an independent Opus packet wrapped in { data, audioLevel? }
+      val frameObjects = frames.map { frame ->
+        val obj = mutableMapOf<String, Any>("data" to frame.data)
+        frame.audioLevel?.let { obj["audioLevel"] = it }
+        obj
+      }
       sendEvent("audioChunk", mapOf(
-        "data" to data,
+        "frames" to frameObjects,
         "timestamp" to timestamp,
         "sequenceNumber" to sequenceNumber,
-        "audioLevel" to audioLevel,
         "duration" to duration,
         "frameCount" to frameCount
       ))
@@ -193,7 +198,7 @@ class AudioConfig : Record {
   var frameSize: Double = 20.0
 
   @Field
-  var packetDuration: Double = 20.0
+  var framesPerCallback: Int = 1
 
   @Field
   var dredDuration: Int = 100  // NEW: DRED recovery duration in ms
@@ -205,7 +210,7 @@ class AudioConfig : Record {
   var amplitudeEventInterval: Double = 16.0
 
   @Field
-  var audioLevelWindow: Int = 360  // RMS window duration in ms (default 360)
+  var enableAudioLevel: Boolean = false  // Enable per-frame audio level calculation
 
   @Field
   var saveDebugAudio: Boolean = false

@@ -59,10 +59,13 @@ export default function App() {
       // Subscribe to audio chunks
       subscriptions.current.push(
         Opuslib.addListener('audioChunk', (event) => {
-          setPacketCount((prev) => prev + 1);
-          setTotalBytes((prev) => prev + event.data.byteLength);
-          setAudioLevel(event.audioLevel);
-          console.log(`[audioChunk] #${event.sequenceNumber}: ${event.data.byteLength}B, level=${event.audioLevel.toFixed(2)}, duration=${event.duration}ms, frames=${event.frameCount}`);
+          const bytes = event.frames.reduce((sum, f) => sum + f.data.byteLength, 0);
+          setPacketCount((prev) => prev + event.frameCount);
+          setTotalBytes((prev) => prev + bytes);
+          // Use last frame's audioLevel (if enableAudioLevel is true)
+          const lastLevel = event.frames[event.frames.length - 1]?.audioLevel ?? 0;
+          setAudioLevel(lastLevel);
+          console.log(`[audioChunk] #${event.sequenceNumber}: ${event.frameCount} frames, ${bytes}B, level=${lastLevel.toFixed(2)}, duration=${event.duration}ms`);
         })
       );
 
@@ -80,8 +83,8 @@ export default function App() {
         channels: 1,
         bitrate: 24000,
         frameSize: 20,
-        packetDuration: 100,
-        audioLevelWindow: 360,
+        framesPerCallback: 5,
+        enableAudioLevel: true,
       });
 
       setIsRecording(true);
@@ -120,8 +123,8 @@ export default function App() {
           <InfoRow label="Bitrate" value="24 kbps" />
           <InfoRow label="Channels" value="Mono" />
           <InfoRow label="Frame Size" value="20 ms" />
-          <InfoRow label="Packet Duration" value="100 ms (5 frames/packet)" />
-          <InfoRow label="Level Window" value="360 ms" />
+          <InfoRow label="Frames/Callback" value="5 (reduces bridge calls)" />
+          <InfoRow label="Audio Level" value="per-frame (enabled)" />
         </View>
 
         <View style={styles.section}>

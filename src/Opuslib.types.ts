@@ -10,35 +10,43 @@ export interface AudioConfig {
   bitrate: number
   /** Frame duration in milliseconds (2.5, 5, 10, 20, 40, 60) */
   frameSize: number
-  /** Packet duration in milliseconds (typically 20-100ms) */
-  packetDuration: number
+  /** Number of Opus frames per callback (default 1). Multiple frames are returned as independent packets in frames[], reducing JS bridge calls */
+  framesPerCallback?: number
   /** DRED recovery duration in milliseconds (0-100, default 100) - NEW in Opus 1.6 */
   dredDuration?: number
   /** Enable amplitude events for waveform visualization */
   enableAmplitudeEvents?: boolean
   /** Amplitude event interval in milliseconds (default 16) */
   amplitudeEventInterval?: number
-  /** Audio level RMS window duration in milliseconds (default 360) */
-  audioLevelWindow?: number
+  /** Enable per-frame audio level calculation (default false). When enabled, each OpusFrame includes audioLevel */
+  enableAudioLevel?: boolean
   /** Save debug PCM audio to file (development only) */
   saveDebugAudio?: boolean
+}
+
+/**
+ * A single Opus frame — one complete opus_encode() output with its own TOC byte
+ */
+export interface OpusFrame {
+  /** Opus-encoded packet data (independent, decodable) */
+  data: ArrayBuffer
+  /** Per-frame audio level 0.0~1.0 (only present when enableAudioLevel is true) */
+  audioLevel?: number
 }
 
 /**
  * Audio chunk event payload (Opus-encoded data)
  */
 export interface AudioChunkEvent {
-  /** Opus-encoded audio data as ArrayBuffer */
-  data: ArrayBuffer
+  /** Array of independent Opus frames. Each frame is a complete opus_encode() output, decodable on its own */
+  frames: OpusFrame[]
   /** Timestamp in milliseconds */
   timestamp: number
-  /** Sequence number (increments with each packet) */
+  /** Sequence number (increments with each callback) */
   sequenceNumber: number
-  /** Audio level normalized to 0.0~1.0 (mapped from dBFS, 0 = silence, 1 = loud) */
-  audioLevel: number
-  /** Duration of this packet in milliseconds (frameSize * frameCount) */
+  /** Duration of all frames in milliseconds (frameSize * frameCount) */
   duration: number
-  /** Number of Opus frames in this packet */
+  /** Number of Opus frames in this callback (= frames.length) */
   frameCount: number
 }
 

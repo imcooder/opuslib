@@ -58,12 +58,19 @@ public class OpuslibModule: Module {
     print("[OpuslibModule] ✅ AudioEngineManager created")
 
     // Set up event callbacks — audioStarted/audioEnd come from encoding thread
-    manager.setOnAudioChunk { [weak self] data, timestamp, sequenceNumber, audioLevel, duration, frameCount in
+    manager.setOnAudioChunk { [weak self] frames, timestamp, sequenceNumber, duration, frameCount in
+      // Each frame is an independent Opus packet wrapped in { data, audioLevel? }
+      let frameObjects: [[String: Any]] = frames.map { frame in
+        var obj: [String: Any] = ["data": frame.data]
+        if let level = frame.audioLevel {
+          obj["audioLevel"] = level
+        }
+        return obj
+      }
       self?.sendEvent("audioChunk", [
-        "data": data,
+        "frames": frameObjects,
         "timestamp": timestamp,
         "sequenceNumber": sequenceNumber,
-        "audioLevel": audioLevel,
         "duration": duration,
         "frameCount": frameCount
       ])
@@ -186,11 +193,11 @@ struct AudioConfig: Record {
   @Field var channels: Int = 1
   @Field var bitrate: Int = 24000
   @Field var frameSize: Double = 20.0
-  @Field var packetDuration: Double = 20.0
+  @Field var framesPerCallback: Int? = 1
   @Field var dredDuration: Int? = 100  // NEW: DRED recovery duration in ms
   @Field var enableAmplitudeEvents: Bool? = false
   @Field var amplitudeEventInterval: Double? = 16.0
-  @Field var audioLevelWindow: Int? = 360  // RMS window duration in ms (default 360)
+  @Field var enableAudioLevel: Bool? = false  // Enable per-frame audio level calculation
   @Field var saveDebugAudio: Bool? = false
 }
 

@@ -53,7 +53,7 @@ export default {
    *   channels: 1,
    *   bitrate: 24000,
    *   frameSize: 20,
-   *   packetDuration: 20,
+   *   framesPerCallback: 5, // batch 5 independent Opus packets per event
    *   dredDuration: 100, // Enable 100ms DRED recovery
    * })
    * ```
@@ -85,8 +85,10 @@ export default {
    * ```ts
    * // Listen for audio chunks
    * const subscription = Opuslib.addListener('audioChunk', (event) => {
-   *   console.log('Received Opus packet:', event.data.byteLength, 'bytes')
-   *   websocket.send(event.data)
+   *   for (const frame of event.frames) {
+   *     console.log('Opus packet:', frame.data.byteLength, 'bytes')
+   *     websocket.send(frame.data)
+   *   }
    * })
    *
    * // Listen for errors

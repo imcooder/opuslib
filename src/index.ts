@@ -14,14 +14,15 @@
  *   channels: 1,
  *   bitrate: 24000,
  *   frameSize: 20,
- *   packetDuration: 20,
+ *   framesPerCallback: 5, // batch 5 independent Opus frames per event
  *   dredDuration: 100, // 100ms DRED recovery
  * })
  *
  * // Listen for Opus packets
  * Opuslib.addListener('audioChunk', (event) => {
- *   // Send to backend
- *   websocket.send(event.data)
+ *   for (const frame of event.frames) {
+ *     websocket.send(frame.data)
+ *   }
  * })
  *
  * // Stop streaming
