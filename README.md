@@ -1,5 +1,9 @@
 # @imcooder/opuslib
 
+[![NPM version](https://img.shields.io/npm/v/@imcooder/opuslib.svg)](https://npmjs.com/package/@imcooder/opuslib)
+[![NPM downloads](https://img.shields.io/npm/dm/@imcooder/opuslib.svg)](https://npmjs.com/package/@imcooder/opuslib)
+[![License](https://img.shields.io/npm/l/@imcooder/opuslib.svg)](https://npmjs.com/package/@imcooder/opuslib)
+
 **Opus 1.6 audio encoding for React Native and Expo**
 
 > **Fork Notice:** This project is forked from [Scdales/opuslib](https://github.com/Scdales/opuslib). We've made the following enhancements:
