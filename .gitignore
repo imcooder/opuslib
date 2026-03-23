@@ -10,8 +10,9 @@ build/
 *.log
 *.tgz
 
-# iOS build artifacts
-ios/opus-build/
+# iOS build artifacts (keep prebuilt XCFramework)
+ios/opus-build/*
+!ios/opus-build/libopus.xcframework/
 *.xcworkspace
 !default.xcworkspace
 xcuserdata/
