@@ -177,7 +177,7 @@ class AudioProcessor(private val config: AudioConfig) {
     while (pendingSamples.size >= samplesPerFrame) {
       val frameData = ShortArray(samplesPerFrame)
       for (i in 0 until samplesPerFrame) {
-        frameData[i] = pendingSamples.removeFirst()
+        frameData[i] = pendingSamples.removeAt(0)
       }
 
       // Debug PCM file
@@ -244,7 +244,7 @@ class AudioProcessor(private val config: AudioConfig) {
     while (pendingSamples.size >= samplesPerFrame) {
       val frameData = ShortArray(samplesPerFrame)
       for (i in 0 until samplesPerFrame) {
-        frameData[i] = pendingSamples.removeFirst()
+        frameData[i] = pendingSamples.removeAt(0)
       }
 
       val opusData = try {
