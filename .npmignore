@@ -14,6 +14,7 @@ __tests__
 /android/src/androidTest/
 /android/src/test/
 /android/build/
+/android/.cxx/
 /example/
 
 # Opus source is extracted from archive at install time
