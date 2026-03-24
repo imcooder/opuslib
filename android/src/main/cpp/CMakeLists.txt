@@ -37,3 +37,6 @@ target_include_directories(
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../../thirdparty/opus-1.6/include
 )
+
+# 16KB page size alignment (required by Google Play for Android 15+ devices)
+target_link_options(opuslib-jni PRIVATE "-Wl,-z,max-page-size=16384")
